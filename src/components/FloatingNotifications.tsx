@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { X, Bell, Clock, AlertTriangle, MessageCircle, ChevronDown, Calendar, Repeat, AppWindow, UserX } from 'lucide-react';
+import { X, Bell, Clock, AlertTriangle, MessageCircle, ChevronDown, Calendar, Repeat, AppWindow, UserX, DollarSign } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -60,9 +60,22 @@ interface SellerSubscriptionWarning {
   isSellerWarning: true;
   isExternalApp: false;
   isAnnual: false;
+  isPendingPayment: false;
 }
 
-type NotificationItem = AnnualClientReminder | ExpiringClient | ExpiringExternalApp | SellerSubscriptionWarning;
+interface PendingPaymentClient {
+  id: string;
+  name: string;
+  phone: string | null;
+  pending_amount: number;
+  expected_payment_date: string;
+  daysRemaining: number;
+  isPendingPayment: true;
+  isExternalApp: false;
+  isAnnual: false;
+}
+
+type NotificationItem = AnnualClientReminder | ExpiringClient | ExpiringExternalApp | SellerSubscriptionWarning | PendingPaymentClient;
 
 export function FloatingNotifications() {
   const { user, isSeller, profile } = useAuth();
@@ -135,6 +148,50 @@ export function FloatingNotifications() {
             appName: appData.name,
             daysRemaining,
             expirationDate: item.expiration_date,
+          });
+        }
+      }
+      
+      return result.sort((a, b) => a.daysRemaining - b.daysRemaining);
+    },
+    enabled: !!user?.id && isSeller,
+    refetchInterval: 60000,
+  });
+
+  // Fetch clients with pending payments
+  const { data: pendingPaymentClients = [] } = useQuery({
+    queryKey: ['pending-payments-notifications', user?.id],
+    queryFn: async () => {
+      if (!user?.id || !isSeller) return [];
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name, phone, pending_amount, expected_payment_date')
+        .eq('seller_id', user.id)
+        .eq('is_archived', false)
+        .eq('is_paid', false)
+        .gt('pending_amount', 0)
+        .not('expected_payment_date', 'is', null);
+      if (error) throw error;
+      
+      const todayDate = startOfToday();
+      const result: PendingPaymentClient[] = [];
+      
+      for (const client of data || []) {
+        if (!client.expected_payment_date || !client.pending_amount) continue;
+        const daysRemaining = differenceInDays(new Date(client.expected_payment_date), todayDate);
+        
+        // Show payments due today, tomorrow, or overdue (within -7 days)
+        if (daysRemaining <= 1 && daysRemaining >= -7) {
+          result.push({
+            id: client.id,
+            name: client.name,
+            phone: client.phone,
+            pending_amount: client.pending_amount,
+            expected_payment_date: client.expected_payment_date,
+            daysRemaining,
+            isPendingPayment: true as const,
+            isExternalApp: false as const,
+            isAnnual: false as const
           });
         }
       }
@@ -235,7 +292,8 @@ export function FloatingNotifications() {
         expirationDate: profile.subscription_expires_at,
         isSellerWarning: true as const,
         isExternalApp: false as const,
-        isAnnual: false as const
+        isAnnual: false as const,
+        isPendingPayment: false as const
       };
     }
     return null;
@@ -243,6 +301,7 @@ export function FloatingNotifications() {
 
   const allNotifications: NotificationItem[] = [
     ...(sellerSubscriptionWarning ? [sellerSubscriptionWarning] : []), // Seller warning first
+    ...pendingPaymentClients, // Pending payments (urgent!)
     ...annualClientReminders, // Annual reminders
     ...externalAppNotifications, // External apps expiring
     ...urgentClients
@@ -260,7 +319,13 @@ export function FloatingNotifications() {
     return null;
   }
 
-  const getDayLabel = (days: number, isAnnual: boolean = false) => {
+  const getDayLabel = (days: number, isAnnual: boolean = false, isPendingPayment: boolean = false) => {
+    if (isPendingPayment) {
+      if (days < 0) return 'ATRASADO';
+      if (days === 0) return 'HOJE';
+      if (days === 1) return 'Amanhã';
+      return `${days}d`;
+    }
     if (isAnnual) return 'Cobrança';
     if (days === 0) return 'HOJE';
     if (days === 1) return 'Amanhã';
@@ -383,6 +448,59 @@ export function FloatingNotifications() {
                         Renovar
                       </Button>
                     </Link>
+                  </div>
+                );
+              }
+              
+              // Handle pending payment notifications
+              if ('isPendingPayment' in item && item.isPendingPayment) {
+                const paymentItem = item as PendingPaymentClient;
+                return (
+                  <div
+                    key={`payment-${paymentItem.id}`}
+                    className={cn(
+                      "px-4 py-3 flex items-center gap-3 hover:bg-muted/50 transition-colors border-b border-border/50 last:border-0",
+                      paymentItem.daysRemaining < 0 ? "bg-red-500/10" : "bg-emerald-500/5"
+                    )}
+                  >
+                    {/* Day Badge */}
+                    <div className={cn(
+                      "flex-shrink-0 w-14 h-10 rounded-lg flex flex-col items-center justify-center text-xs font-bold",
+                      paymentItem.daysRemaining < 0 
+                        ? "text-red-600 bg-red-500/20" 
+                        : paymentItem.daysRemaining === 0 
+                        ? "text-amber-600 bg-amber-500/20"
+                        : "text-emerald-600 bg-emerald-500/20"
+                    )}>
+                      <DollarSign className="h-4 w-4" />
+                      <span className="text-[10px]">{getDayLabel(paymentItem.daysRemaining, false, true)}</span>
+                    </div>
+
+                    {/* Payment Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm truncate">{paymentItem.name}</p>
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400 truncate flex items-center gap-1">
+                        <DollarSign className="h-3 w-3" />
+                        R$ {paymentItem.pending_amount.toFixed(2)}
+                        {paymentItem.daysRemaining < 0 && (
+                          <span className="text-red-500 ml-1">
+                            ({Math.abs(paymentItem.daysRemaining)}d atrasado)
+                          </span>
+                        )}
+                      </p>
+                    </div>
+
+                    {/* WhatsApp Button */}
+                    {paymentItem.phone && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-green-500 hover:text-green-600 hover:bg-green-500/10 flex-shrink-0"
+                        onClick={() => openWhatsApp(paymentItem.phone!, paymentItem.name)}
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 );
               }
