@@ -17,6 +17,13 @@ interface Profile {
   tutorial_visto: boolean;
 }
 
+interface TrialInfo {
+  isInTrial: boolean;
+  daysRemaining: number;
+  trialExpired: boolean;
+  trialEndDate?: Date;
+}
+
 interface AuthContextType {
   user: User | null;
   session: Session | null;
@@ -25,7 +32,8 @@ interface AuthContextType {
   isAdmin: boolean;
   isSeller: boolean;
   isUser: boolean;
-  hasSystemAccess: boolean; // true se admin ou seller
+  hasSystemAccess: boolean; // true se admin, seller, ou user em período de teste
+  trialInfo: TrialInfo; // informações do período de teste
   loading: boolean;
   needsPasswordUpdate: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
@@ -297,7 +305,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = role === 'admin';
   const isSeller = role === 'seller';
   const isUser = role === 'user';
-  const hasSystemAccess = isAdmin || isSeller;
+  
+  // Calcular período de teste de 5 dias para usuários 'user'
+  const TRIAL_DAYS = 5;
+  const trialInfo = (() => {
+    if (!profile?.created_at || role !== 'user') {
+      return { isInTrial: false, daysRemaining: 0, trialExpired: false };
+    }
+    
+    const createdAt = new Date(profile.created_at);
+    const trialEndDate = new Date(createdAt.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const daysRemaining = Math.ceil((trialEndDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    
+    return {
+      isInTrial: daysRemaining > 0,
+      daysRemaining: Math.max(0, daysRemaining),
+      trialExpired: daysRemaining <= 0,
+      trialEndDate
+    };
+  })();
+  
+  // hasSystemAccess: admin, seller, ou user em período de teste
+  const hasSystemAccess = isAdmin || isSeller || trialInfo.isInTrial;
 
   return (
     <AuthContext.Provider value={{
@@ -309,6 +339,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSeller,
       isUser,
       hasSystemAccess,
+      trialInfo,
       loading,
       needsPasswordUpdate: profile?.needs_password_update ?? false,
       signIn,

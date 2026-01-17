@@ -21,9 +21,45 @@ import {
   Eye,
   Share2,
   RefreshCw,
+  Clock,
+  MessageCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { navItems, filterNavItems } from '@/config/navigation';
+
+// Banner de período de teste
+function TrialBanner({ daysRemaining }: { daysRemaining: number }) {
+  const openAdminWhatsApp = () => {
+    const phone = '5531998518865';
+    const message = `Olá! Estou usando o período de teste do PSControl e gostaria de ativar minha conta como revendedor.`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  return (
+    <div className={cn(
+      "flex items-center justify-between gap-3 px-4 py-2 text-sm",
+      daysRemaining <= 2 
+        ? "bg-destructive/10 text-destructive border-b border-destructive/20" 
+        : "bg-warning/10 text-warning border-b border-warning/20"
+    )}>
+      <div className="flex items-center gap-2">
+        <Clock className="h-4 w-4" />
+        <span>
+          <strong>Período de teste:</strong> {daysRemaining} {daysRemaining === 1 ? 'dia restante' : 'dias restantes'}
+        </span>
+      </div>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={openAdminWhatsApp}
+        className="gap-1 h-7 text-xs hover:bg-green-500/20"
+      >
+        <MessageCircle className="h-3 w-3" />
+        Ativar conta
+      </Button>
+    </div>
+  );
+}
 
 function MobileMenuContent({ onNavigate }: { onNavigate?: () => void }) {
   const { profile, isAdmin, isSeller, signOut } = useAuth();
@@ -143,10 +179,12 @@ function MobileMenuContent({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppLayout() {
-  const { user, loading, hasSystemAccess } = useAuth();
+  const { user, loading, hasSystemAccess, trialInfo, isUser } = useAuth();
   const isMobile = useIsMobile();
   const { menuStyle } = useMenuStyle();
   const [menuOpen, setMenuOpen] = useState(false);
+  
+  const showTrialBanner = isUser && trialInfo.isInTrial;
 
   const sidebarWidth = getSidebarWidth(menuStyle);
   const isIconsOnly = menuStyle === 'icons-only';
@@ -198,10 +236,23 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Trial Banner - shows for users in trial period */}
+      {showTrialBanner && (
+        <div 
+          className="fixed top-0 right-0 z-[60] transition-all duration-300"
+          style={!isMobile ? { left: sidebarWidth } : { left: 0 }}
+        >
+          <TrialBanner daysRemaining={trialInfo.daysRemaining} />
+        </div>
+      )}
+
       {/* Top Action Bar - Desktop only */}
       {!isMobile && (
         <div 
-          className="fixed top-0 right-0 z-50 p-2 bg-background/80 backdrop-blur-sm transition-all duration-300"
+          className={cn(
+            "fixed right-0 z-50 p-2 bg-background/80 backdrop-blur-sm transition-all duration-300",
+            showTrialBanner ? "top-10" : "top-0"
+          )}
           style={{ left: sidebarWidth }}
         >
           <div className="flex justify-end gap-1">
@@ -232,7 +283,10 @@ export function AppLayout() {
       
       {/* Mobile top indicator for pending queue */}
       {isMobile && (
-        <div className="fixed top-0 left-0 right-0 z-50 p-2 bg-background/80 backdrop-blur-sm border-b border-border">
+        <div className={cn(
+          "fixed left-0 right-0 z-50 p-2 bg-background/80 backdrop-blur-sm border-b border-border",
+          showTrialBanner ? "top-10" : "top-0"
+        )}>
           <div className="flex justify-end">
             <PendingQueueIndicator />
           </div>
@@ -242,7 +296,8 @@ export function AppLayout() {
       <Sidebar />
       <main 
         className={cn(
-          "min-h-screen pt-12 transition-all duration-300",
+          "min-h-screen transition-all duration-300",
+          showTrialBanner ? "pt-[88px]" : "pt-12",
           isMobile ? "pb-20" : ""
         )}
         style={!isMobile ? { paddingLeft: sidebarWidth } : undefined}
