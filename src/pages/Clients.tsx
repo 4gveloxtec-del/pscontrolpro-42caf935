@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useCrypto } from '@/hooks/useCrypto';
 import { useFingerprint } from '@/hooks/useFingerprint';
@@ -7,6 +7,7 @@ import { useOfflineClients } from '@/hooks/useOfflineClients';
 import { useSentMessages } from '@/hooks/useSentMessages';
 import { useRenewalMutation } from '@/hooks/useRenewalMutation';
 import { useClientValidation } from '@/hooks/useClientValidation';
+import { usePerformanceOptimization } from '@/hooks/usePerformanceOptimization';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -47,7 +48,10 @@ import { SharedCreditPicker, SharedCreditSelection } from '@/components/SharedCr
 import { Badge } from '@/components/ui/badge';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { ClientExternalApps, ClientExternalAppsDisplay } from '@/components/ClientExternalApps';
-import { ClientPremiumAccounts, ClientPremiumAccountsDisplay, PremiumAccount } from '@/components/ClientPremiumAccounts';
+import { ClientPremiumAccounts, PremiumAccount } from '@/components/ClientPremiumAccounts';
+import { LazyAccountsDisplay } from '@/components/LazyAccountsDisplay';
+import { LazyPremiumAccounts } from '@/components/LazyPremiumAccounts';
+import { PaginationControls } from '@/components/PaginationControls';
 import { BulkLoyaltyMessage } from '@/components/BulkLoyaltyMessage';
 import { ExpirationDaySummary } from '@/components/ExpirationDaySummary';
 
@@ -1632,26 +1636,40 @@ export default function Clients() {
   });
 
   // Sort clients: recently added (last 2 hours) appear at top, then by expiration
-  const sortedClients = [...filteredClients].sort((a, b) => {
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
-    const aCreatedAt = a.created_at ? new Date(a.created_at) : null;
-    const bCreatedAt = b.created_at ? new Date(b.created_at) : null;
-    
-    const aIsRecent = aCreatedAt && aCreatedAt > twoHoursAgo;
-    const bIsRecent = bCreatedAt && bCreatedAt > twoHoursAgo;
-    
-    // Recent clients first
-    if (aIsRecent && !bIsRecent) return -1;
-    if (!aIsRecent && bIsRecent) return 1;
-    
-    // Among recent clients, newest first
-    if (aIsRecent && bIsRecent) {
-      return bCreatedAt!.getTime() - aCreatedAt!.getTime();
-    }
-    
-    // For older clients, sort by expiration date
-    return new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime();
-  });
+  const sortedClients = useMemo(() => {
+    return [...filteredClients].sort((a, b) => {
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      const aCreatedAt = a.created_at ? new Date(a.created_at) : null;
+      const bCreatedAt = b.created_at ? new Date(b.created_at) : null;
+      
+      const aIsRecent = aCreatedAt && aCreatedAt > twoHoursAgo;
+      const bIsRecent = bCreatedAt && bCreatedAt > twoHoursAgo;
+      
+      // Recent clients first
+      if (aIsRecent && !bIsRecent) return -1;
+      if (!aIsRecent && bIsRecent) return 1;
+      
+      // Among recent clients, newest first
+      if (aIsRecent && bIsRecent) {
+        return bCreatedAt!.getTime() - aCreatedAt!.getTime();
+      }
+      
+      // For older clients, sort by expiration date
+      return new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime();
+    });
+  }, [filteredClients]);
+
+  // Performance optimization - Pagination
+  const ITEMS_PER_PAGE = 50;
+  const {
+    paginatedItems: paginatedClients,
+    currentPage,
+    totalPages,
+    goToPage,
+    startIndex,
+    endIndex,
+    totalItems,
+  } = usePerformanceOptimization(sortedClients, { pageSize: ITEMS_PER_PAGE });
 
   const addCategoryMutation = useMutation({
     mutationFn: async (name: string) => {
@@ -2952,8 +2970,19 @@ export default function Clients() {
           </CardContent>
         </Card>
       ) : (
+        <>
+        {/* Pagination Controls - Top */}
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={goToPage}
+          isLoading={isLoading}
+        />
         <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {sortedClients.map((client) => {
+          {paginatedClients.map((client) => {
             const status = getClientStatus(client);
             const daysLeft = differenceInDays(new Date(client.expiration_date), today);
             const hasCredentials = client.login || client.password;
@@ -3299,6 +3328,16 @@ export default function Clients() {
                       <ClientExternalAppsDisplay clientId={client.id} sellerId={user.id} />
                     )}
 
+                    {/* Premium Accounts - Lazy loaded, only shown on click */}
+                    {user && (
+                      <LazyPremiumAccounts 
+                        clientId={client.id} 
+                        sellerId={user.id}
+                        isPrivacyMode={isPrivacyMode}
+                        maskData={maskData}
+                      />
+                    )}
+
                     {hasCredentials && !isPrivacyMode && (
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <Lock className="h-3.5 w-3.5" />
@@ -3466,6 +3505,17 @@ export default function Clients() {
             );
           })}
         </div>
+        {/* Pagination Controls - Bottom */}
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          startIndex={startIndex}
+          endIndex={endIndex}
+          onPageChange={goToPage}
+          isLoading={isLoading}
+        />
+        </>
       )}
 
       {/* Send Message Dialog */}
