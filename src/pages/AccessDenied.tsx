@@ -1,13 +1,16 @@
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShieldX, LogOut, Clock, Mail, MessageCircle, AlertTriangle } from 'lucide-react';
+import { ShieldX, LogOut, Clock, Mail, MessageCircle, AlertTriangle, RotateCcw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 export default function AccessDenied() {
-  const { profile, signOut, role, trialInfo, hasSystemAccess } = useAuth();
+  const { profile, signOut, role, trialInfo, hasSystemAccess, isAdmin } = useAuth();
   const navigate = useNavigate();
+  const [resetting, setResetting] = useState(false);
 
   // Se o usuário ainda está em período de teste, redirecionar para dashboard
   useEffect(() => {
@@ -20,6 +23,38 @@ export default function AccessDenied() {
     const phone = '5531998518865';
     const message = `Olá! Me chamo ${profile?.full_name || profile?.email} e gostaria de continuar usando o sistema PSControl como revendedor. Meu período de teste expirou.`;
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+  };
+
+  const handleResetTrial = async () => {
+    setResetting(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await supabase.functions.invoke('reset-trial', {
+        headers: {
+          Authorization: `Bearer ${session?.access_token}`,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message);
+      }
+
+      toast.success('Período de teste reiniciado! Recarregando...');
+      
+      // Clear cache and reload
+      localStorage.removeItem('cached_profile');
+      localStorage.removeItem('cached_role');
+      localStorage.removeItem('cached_user_id');
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+    } catch (error: any) {
+      toast.error('Erro ao reiniciar teste: ' + error.message);
+    } finally {
+      setResetting(false);
+    }
   };
 
   return (
@@ -69,8 +104,19 @@ export default function AccessDenied() {
               Ativar Conta via WhatsApp
             </Button>
             
+            {/* Botão para reiniciar teste (para testes/admin) */}
             <Button 
-              variant="outline" 
+              variant="outline"
+              onClick={handleResetTrial}
+              disabled={resetting}
+              className="w-full gap-2"
+            >
+              <RotateCcw className={`h-4 w-4 ${resetting ? 'animate-spin' : ''}`} />
+              {resetting ? 'Reiniciando...' : 'Reiniciar Período de Teste'}
+            </Button>
+            
+            <Button 
+              variant="ghost" 
               onClick={signOut}
               className="w-full gap-2"
             >
