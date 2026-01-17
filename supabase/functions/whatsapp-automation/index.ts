@@ -32,18 +32,23 @@ interface Profile {
   pix_key: string;
 }
 
-interface WhatsAppConfig {
-  user_id: string;
+interface GlobalConfig {
   api_url: string;
   api_token: string;
+  is_active: boolean;
+}
+
+interface SellerInstance {
+  seller_id: string;
   instance_name: string;
   is_connected: boolean;
   auto_send_enabled: boolean;
 }
 
-// Send message via Evolution API
+// Send message via Evolution API using global config + seller instance
 async function sendEvolutionMessage(
-  config: WhatsAppConfig,
+  globalConfig: GlobalConfig,
+  instanceName: string,
   phone: string,
   message: string
 ): Promise<boolean> {
@@ -53,13 +58,13 @@ async function sendEvolutionMessage(
       formattedPhone = '55' + formattedPhone;
     }
 
-    const url = `${config.api_url}/message/sendText/${config.instance_name}`;
+    const url = `${globalConfig.api_url}/message/sendText/${instanceName}`;
     
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': config.api_token,
+        'apikey': globalConfig.api_token,
       },
       body: JSON.stringify({
         number: formattedPhone,
@@ -67,7 +72,7 @@ async function sendEvolutionMessage(
       }),
     });
 
-    console.log(`Message sent to ${formattedPhone}: ${response.ok}`);
+    console.log(`Message sent to ${formattedPhone} via instance ${instanceName}: ${response.ok}`);
     return response.ok;
   } catch (error) {
     console.error('Error sending message:', error);
@@ -109,6 +114,30 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+    // First, get global config
+    const { data: globalConfigData, error: globalConfigError } = await supabase
+      .from('whatsapp_global_config')
+      .select('*')
+      .maybeSingle();
+
+    if (globalConfigError) {
+      console.log('Error fetching global config:', globalConfigError.message);
+      return new Response(
+        JSON.stringify({ message: 'Global config not found', error: globalConfigError.message, sent: 0 }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (!globalConfigData || !globalConfigData.is_active) {
+      console.log('WhatsApp API is inactive or not configured');
+      return new Response(
+        JSON.stringify({ message: 'WhatsApp API está desativada pelo administrador', sent: 0 }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const globalConfig: GlobalConfig = globalConfigData as GlobalConfig;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayStr = today.toISOString().split('T')[0];
@@ -122,38 +151,38 @@ serve(async (req) => {
     in30Days.setDate(in30Days.getDate() + 30);
     const in30DaysStr = in30Days.toISOString().split('T')[0];
 
-    console.log('Running WhatsApp automation check...');
+    console.log('Running WhatsApp automation with centralized config...');
     console.log(`Today: ${todayStr}, +3 days: ${in3DaysStr}, +30 days: ${in30DaysStr}`);
 
-    // Get all WhatsApp configs with auto_send enabled from database
-    const { data: configs, error: configError } = await supabase
-      .from('whatsapp_api_config')
+    // Get all seller instances with auto_send enabled and connected
+    const { data: sellerInstances, error: instancesError } = await supabase
+      .from('whatsapp_seller_instances')
       .select('*')
       .eq('auto_send_enabled', true)
       .eq('is_connected', true);
 
-    if (configError) {
-      console.log('Error fetching configs (table may not exist):', configError.message);
+    if (instancesError) {
+      console.log('Error fetching seller instances:', instancesError.message);
       return new Response(
-        JSON.stringify({ message: 'WhatsApp config table not found', error: configError.message, sent: 0 }),
+        JSON.stringify({ message: 'Error fetching seller instances', error: instancesError.message, sent: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    if (!configs || configs.length === 0) {
-      console.log('No active WhatsApp configurations found');
+    if (!sellerInstances || sellerInstances.length === 0) {
+      console.log('No active seller instances found');
       return new Response(
-        JSON.stringify({ message: 'No active configurations', sent: 0 }),
+        JSON.stringify({ message: 'No active seller instances', sent: 0 }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log(`Found ${configs.length} active configurations`);
+    console.log(`Found ${sellerInstances.length} active seller instances`);
 
     let totalSent = 0;
     const results: any[] = [];
 
-    // Get admin config for reseller notifications
+    // Get admin info for reseller notifications
     const { data: adminRoles } = await supabase
       .from('user_roles')
       .select('user_id')
@@ -161,18 +190,25 @@ serve(async (req) => {
 
     const adminIds = adminRoles?.map(r => r.user_id) || [];
     
-    // Get admin WhatsApp config
-    const adminConfig = configs.find(c => adminIds.includes(c.user_id)) as WhatsAppConfig | undefined;
+    // Get admin instance for reseller notifications
+    const { data: adminInstance } = await supabase
+      .from('whatsapp_seller_instances')
+      .select('*')
+      .in('seller_id', adminIds)
+      .eq('is_connected', true)
+      .maybeSingle();
 
     // PART 1: Admin → Reseller notifications
-    if (adminConfig) {
+    if (adminInstance && adminIds.length > 0) {
       console.log('Processing admin to reseller notifications...');
+
+      const adminId = adminIds[0];
 
       // Get admin profile for template variables
       const { data: adminProfile } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', adminConfig.user_id)
+        .eq('id', adminId)
         .single();
 
       // Get app price
@@ -195,7 +231,7 @@ serve(async (req) => {
       const { data: adminTemplates } = await supabase
         .from('whatsapp_templates')
         .select('*')
-        .eq('seller_id', adminConfig.user_id);
+        .eq('seller_id', adminId);
 
       for (const reseller of expiringResellers || []) {
         if (!reseller.whatsapp) continue;
@@ -215,7 +251,7 @@ serve(async (req) => {
           continue;
         }
 
-        // Check if notification already sent (in database)
+        // Check if notification already sent
         const { data: existing } = await supabase
           .from('reseller_notification_tracking')
           .select('id')
@@ -250,16 +286,21 @@ serve(async (req) => {
           empresa: adminProfile?.company_name || '',
         });
 
-        // Send message
-        const sent = await sendEvolutionMessage(adminConfig, reseller.whatsapp, message);
+        // Send message using global config + admin instance
+        const sent = await sendEvolutionMessage(
+          globalConfig, 
+          adminInstance.instance_name, 
+          reseller.whatsapp, 
+          message
+        );
 
         if (sent) {
-          // Record notification in database
+          // Record notification
           await supabase.from('reseller_notification_tracking').insert({
             reseller_id: reseller.id,
+            admin_id: adminId,
             notification_type: notificationType,
             expiration_cycle_date: reseller.subscription_expires_at,
-            sent_via: 'whatsapp',
           });
 
           totalSent++;
@@ -272,28 +313,28 @@ serve(async (req) => {
       }
     }
 
-    // PART 2: Reseller → Client notifications
-    for (const config of configs) {
-      console.log(`Processing notifications for seller ${config.user_id}`);
+    // PART 2: Seller → Client notifications
+    for (const sellerInstance of sellerInstances as SellerInstance[]) {
+      console.log(`Processing notifications for seller ${sellerInstance.seller_id}`);
 
       // Get seller profile
       const { data: sellerProfile } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', config.user_id)
+        .eq('id', sellerInstance.seller_id)
         .single();
 
       // Get seller templates
       const { data: templates } = await supabase
         .from('whatsapp_templates')
         .select('*')
-        .eq('seller_id', config.user_id);
+        .eq('seller_id', sellerInstance.seller_id);
 
       // Get clients expiring in relevant timeframes
       const { data: clients } = await supabase
         .from('clients')
         .select('*')
-        .eq('seller_id', config.user_id)
+        .eq('seller_id', sellerInstance.seller_id)
         .eq('is_archived', false)
         .or(`expiration_date.eq.${todayStr},expiration_date.eq.${in3DaysStr},expiration_date.eq.${in30DaysStr}`);
 
@@ -321,7 +362,7 @@ serve(async (req) => {
           continue;
         }
 
-        // Check if notification already sent (in database)
+        // Check if notification already sent
         const { data: existing } = await supabase
           .from('client_notification_tracking')
           .select('id')
@@ -361,14 +402,19 @@ serve(async (req) => {
           servico: client.category || 'IPTV',
         });
 
-        // Send message
-        const sent = await sendEvolutionMessage(config as WhatsAppConfig, client.phone, message);
+        // Send message using global config + seller's instance
+        const sent = await sendEvolutionMessage(
+          globalConfig, 
+          sellerInstance.instance_name, 
+          client.phone, 
+          message
+        );
 
         if (sent) {
-          // Record notification in database
+          // Record notification
           await supabase.from('client_notification_tracking').insert({
             client_id: client.id,
-            seller_id: config.user_id,
+            seller_id: sellerInstance.seller_id,
             notification_type: notificationType,
             expiration_cycle_date: client.expiration_date,
             sent_via: 'whatsapp',
@@ -377,7 +423,7 @@ serve(async (req) => {
           totalSent++;
           results.push({
             type: 'client',
-            seller: config.user_id,
+            seller: sellerInstance.seller_id,
             client: client.name,
             notificationType,
           });

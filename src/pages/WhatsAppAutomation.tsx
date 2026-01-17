@@ -1,38 +1,31 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
-import { supabaseWhatsApp } from '@/lib/supabase-external';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { 
-  MessageCircle, Settings, Users, Calendar, Clock, AlertTriangle, CheckCircle, Loader2, RefreshCw, FileText
+  MessageCircle, Settings, Users, AlertTriangle, CheckCircle, Loader2, RefreshCw, Shield
 } from 'lucide-react';
-import { WhatsAppApiConfig } from '@/components/WhatsAppApiConfig';
+import { WhatsAppGlobalConfig } from '@/components/WhatsAppGlobalConfig';
+import { WhatsAppSellerConfig } from '@/components/WhatsAppSellerConfig';
 import { ManualMessageSender } from '@/components/ManualMessageSender';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-
-interface WhatsAppConfig {
-  is_connected: boolean;
-  auto_send_enabled: boolean;
-}
+import { useWhatsAppGlobalConfig } from '@/hooks/useWhatsAppGlobalConfig';
+import { useWhatsAppSellerInstance } from '@/hooks/useWhatsAppSellerInstance';
 
 export default function WhatsAppAutomation() {
   const { user, isAdmin } = useAuth();
   const [isRunningAutomation, setIsRunningAutomation] = useState(false);
-  const [config, setConfig] = useState<WhatsAppConfig | null>(null);
   const [expiringClients, setExpiringClients] = useState<any[]>([]);
   const [expiringResellers, setExpiringResellers] = useState<any[]>([]);
 
+  const { config: globalConfig, isApiActive } = useWhatsAppGlobalConfig();
+  const { instance: sellerInstance } = useWhatsAppSellerInstance();
+
   useEffect(() => {
     if (!user?.id) return;
-    
-    // Fetch config
-    supabase.from('whatsapp_api_config' as any).select('*').eq('user_id', user.id).maybeSingle()
-      .then(({ data }) => { if (data) setConfig(data as unknown as WhatsAppConfig); });
     
     // Fetch clients/resellers
     const today = new Date();
@@ -88,6 +81,12 @@ export default function WhatsAppAutomation() {
     in3Days: expiringResellers.filter(r => { const d = daysUntil(r.subscription_expires_at); return d > 0 && d <= 3; }),
   };
 
+  const isConnected = isAdmin 
+    ? (sellerInstance?.is_connected && isApiActive)
+    : (sellerInstance?.is_connected && isApiActive);
+
+  const canRunAutomation = isConnected && sellerInstance?.auto_send_enabled;
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -97,10 +96,10 @@ export default function WhatsAppAutomation() {
             Automação WhatsApp
           </h1>
           <p className="text-muted-foreground">
-            {isAdmin ? 'Gerencie lembretes para revendedores' : 'Gerencie lembretes para clientes'}
+            {isAdmin ? 'Configure a API global e gerencie revendedores' : 'Conecte seu WhatsApp e gerencie lembretes'}
           </p>
         </div>
-        {config?.is_connected && config?.auto_send_enabled && (
+        {canRunAutomation && (
           <Button onClick={runManualAutomation} disabled={isRunningAutomation}>
             {isRunningAutomation ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
             Executar Agora
@@ -109,23 +108,33 @@ export default function WhatsAppAutomation() {
       </div>
 
       <Tabs defaultValue="dashboard" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2 max-w-md">
+        <TabsList className={`grid w-full max-w-md ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
           <TabsTrigger value="dashboard" className="gap-2"><Users className="h-4 w-4" />Dashboard</TabsTrigger>
-          <TabsTrigger value="config" className="gap-2"><Settings className="h-4 w-4" />Configuração</TabsTrigger>
+          <TabsTrigger value="config" className="gap-2"><Settings className="h-4 w-4" />Minha Instância</TabsTrigger>
+          {isAdmin && (
+            <TabsTrigger value="global" className="gap-2"><Shield className="h-4 w-4" />API Global</TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-6">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2">
-                {config?.is_connected ? <CheckCircle className="h-5 w-5 text-success" /> : <AlertTriangle className="h-5 w-5 text-warning" />}
+                {isConnected ? <CheckCircle className="h-5 w-5 text-success" /> : <AlertTriangle className="h-5 w-5 text-warning" />}
                 Status
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex gap-4">
-                <Badge variant={config?.is_connected ? "default" : "secondary"}>{config?.is_connected ? 'Conectado' : 'Desconectado'}</Badge>
-                <Badge variant={config?.auto_send_enabled ? "default" : "outline"}>{config?.auto_send_enabled ? 'Automático' : 'Manual'}</Badge>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={isApiActive ? "default" : "destructive"}>
+                  API: {isApiActive ? 'Ativa' : 'Inativa'}
+                </Badge>
+                <Badge variant={sellerInstance?.is_connected ? "default" : "secondary"}>
+                  {sellerInstance?.is_connected ? 'Conectado' : 'Desconectado'}
+                </Badge>
+                <Badge variant={sellerInstance?.auto_send_enabled ? "default" : "outline"}>
+                  {sellerInstance?.auto_send_enabled ? 'Automático' : 'Manual'}
+                </Badge>
               </div>
             </CardContent>
           </Card>
@@ -194,12 +203,34 @@ export default function WhatsAppAutomation() {
         <TabsContent value="config">
           <Card>
             <CardHeader>
-              <CardTitle>Configuração da API Evolution</CardTitle>
-              <CardDescription>Configure sua conexão para envio automático</CardDescription>
+              <CardTitle>Minha Instância WhatsApp</CardTitle>
+              <CardDescription>
+                {isAdmin 
+                  ? 'Configure sua própria instância para enviar mensagens aos revendedores'
+                  : 'Conecte seu WhatsApp para enviar mensagens aos clientes'
+                }
+              </CardDescription>
             </CardHeader>
-            <CardContent><WhatsAppApiConfig /></CardContent>
+            <CardContent><WhatsAppSellerConfig /></CardContent>
           </Card>
         </TabsContent>
+
+        {isAdmin && (
+          <TabsContent value="global">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  Configuração Global da API
+                </CardTitle>
+                <CardDescription>
+                  Configure a API Evolution que será usada por todos os revendedores
+                </CardDescription>
+              </CardHeader>
+              <CardContent><WhatsAppGlobalConfig /></CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

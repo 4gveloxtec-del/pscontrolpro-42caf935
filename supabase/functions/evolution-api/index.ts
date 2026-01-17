@@ -85,6 +85,63 @@ async function checkEvolutionConnection(config: EvolutionConfig): Promise<boolea
   }
 }
 
+// Get QR Code for connection
+async function getEvolutionQrCode(config: EvolutionConfig): Promise<{ qrcode?: string; connected?: boolean; error?: string }> {
+  try {
+    // First check if already connected
+    const isConnected = await checkEvolutionConnection(config);
+    if (isConnected) {
+      return { connected: true };
+    }
+
+    // Try to get QR code
+    const url = `${config.api_url}/instance/connect/${config.instance_name}`;
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': config.api_token,
+      },
+    });
+
+    if (!response.ok) {
+      // If instance doesn't exist, try to create it first
+      const createUrl = `${config.api_url}/instance/create`;
+      const createResponse = await fetch(createUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': config.api_token,
+        },
+        body: JSON.stringify({
+          instanceName: config.instance_name,
+          qrcode: true,
+        }),
+      });
+
+      if (createResponse.ok) {
+        const createResult = await createResponse.json();
+        if (createResult.qrcode?.base64) {
+          return { qrcode: createResult.qrcode.base64 };
+        }
+      }
+
+      return { error: 'Failed to get QR code' };
+    }
+
+    const result = await response.json();
+    
+    if (result.base64 || result.qrcode?.base64) {
+      return { qrcode: result.base64 || result.qrcode.base64 };
+    }
+
+    return { error: 'No QR code available' };
+  } catch (error) {
+    console.error('Error getting QR code:', error);
+    return { error: (error as Error).message };
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -108,19 +165,35 @@ serve(async (req) => {
 
         const isConnected = await checkEvolutionConnection(config);
         
-        // Update connection status in database if userId provided
+        // Update connection status in seller instances table if userId provided
         if (userId) {
           await supabase
-            .from('whatsapp_api_config')
+            .from('whatsapp_seller_instances')
             .update({ 
               is_connected: isConnected, 
-              last_check_at: new Date().toISOString() 
+              last_connection_check: new Date().toISOString() 
             })
-            .eq('user_id', userId);
+            .eq('seller_id', userId);
         }
 
         return new Response(
           JSON.stringify({ connected: isConnected }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case 'get_qrcode': {
+        if (!config?.api_url || !config?.api_token || !config?.instance_name) {
+          return new Response(
+            JSON.stringify({ error: 'Missing configuration' }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const result = await getEvolutionQrCode(config);
+        
+        return new Response(
+          JSON.stringify(result),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -156,7 +229,8 @@ serve(async (req) => {
           );
         }
 
-        const { messages } = await req.json();
+        const body = await req.json();
+        const messages = body.messages;
         if (!messages || !Array.isArray(messages)) {
           return new Response(
             JSON.stringify({ success: false, error: 'Missing messages array' }),

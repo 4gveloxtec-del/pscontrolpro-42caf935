@@ -167,6 +167,47 @@ export type Database = {
           },
         ]
       }
+      client_notification_tracking: {
+        Row: {
+          client_id: string
+          expiration_cycle_date: string
+          id: string
+          notification_type: string
+          seller_id: string
+          sent_at: string | null
+          sent_via: string | null
+          service_type: string | null
+        }
+        Insert: {
+          client_id: string
+          expiration_cycle_date: string
+          id?: string
+          notification_type: string
+          seller_id: string
+          sent_at?: string | null
+          sent_via?: string | null
+          service_type?: string | null
+        }
+        Update: {
+          client_id?: string
+          expiration_cycle_date?: string
+          id?: string
+          notification_type?: string
+          seller_id?: string
+          sent_at?: string | null
+          sent_via?: string | null
+          service_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_notification_tracking_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_premium_accounts: {
         Row: {
           client_id: string
@@ -839,6 +880,33 @@ export type Database = {
           },
         ]
       }
+      reseller_notification_tracking: {
+        Row: {
+          admin_id: string
+          expiration_cycle_date: string
+          id: string
+          notification_type: string
+          reseller_id: string
+          sent_at: string | null
+        }
+        Insert: {
+          admin_id: string
+          expiration_cycle_date: string
+          id?: string
+          notification_type: string
+          reseller_id: string
+          sent_at?: string | null
+        }
+        Update: {
+          admin_id?: string
+          expiration_cycle_date?: string
+          id?: string
+          notification_type?: string
+          reseller_id?: string
+          sent_at?: string | null
+        }
+        Relationships: []
+      }
       server_apps: {
         Row: {
           app_type: string
@@ -1072,6 +1140,66 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["app_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      whatsapp_global_config: {
+        Row: {
+          api_token: string
+          api_url: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          updated_at: string | null
+        }
+        Insert: {
+          api_token?: string
+          api_url?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string | null
+        }
+        Update: {
+          api_token?: string
+          api_url?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      whatsapp_seller_instances: {
+        Row: {
+          auto_send_enabled: boolean | null
+          created_at: string | null
+          id: string
+          instance_name: string
+          is_connected: boolean | null
+          last_connection_check: string | null
+          seller_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          auto_send_enabled?: boolean | null
+          created_at?: string | null
+          id?: string
+          instance_name?: string
+          is_connected?: boolean | null
+          last_connection_check?: string | null
+          seller_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          auto_send_enabled?: boolean | null
+          created_at?: string | null
+          id?: string
+          instance_name?: string
+          is_connected?: boolean | null
+          last_connection_check?: string | null
+          seller_id?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
