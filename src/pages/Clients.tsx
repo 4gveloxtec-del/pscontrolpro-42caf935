@@ -2522,62 +2522,89 @@ export default function Clients() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="pending_amount">Valor Pendente (R$)</Label>
-                  <Input
-                    id="pending_amount"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.pending_amount}
-                    onChange={(e) => setFormData({ ...formData, pending_amount: e.target.value })}
-                    placeholder="Ex: 20.00"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Valor que o cliente ainda deve pagar (pagamento parcial).
-                  </p>
-                </div>
                 
-                {/* Data Prevista de Pagamento - Only show when unpaid */}
-                {!formData.is_paid && (
-                  <div className="space-y-2">
-                    <Label htmlFor="expected_payment_date" className="flex items-center gap-1">
-                      <CalendarIcon className="h-3 w-3" />
-                      Data Prevista de Pagamento
-                    </Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          type="button"
-                          className={cn(
-                            "w-full justify-start text-left font-normal",
-                            !formData.expected_payment_date && "text-muted-foreground"
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {formData.expected_payment_date
-                            ? format(new Date(formData.expected_payment_date + 'T12:00:00'), 'dd/MM/yyyy', { locale: ptBR })
-                            : 'Selecione a data'}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <CalendarPicker
-                          mode="single"
-                          selected={formData.expected_payment_date ? new Date(formData.expected_payment_date + 'T12:00:00') : undefined}
-                          onSelect={(date) => {
-                            if (date) {
-                              setFormData({ ...formData, expected_payment_date: format(date, 'yyyy-MM-dd') });
-                            }
+                {/* Valor Pendente e Data de Pagamento - Mostrar quando não pago OU com valor pendente */}
+                {(!formData.is_paid || parseFloat(formData.pending_amount || '0') > 0) && (
+                  <div className="md:col-span-2 p-4 rounded-lg bg-emerald-500/10 border border-emerald-500/30 space-y-4">
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+                      <DollarSign className="h-4 w-4" />
+                      <Label className="text-sm font-medium">Cobrança Pendente</Label>
+                    </div>
+                    
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="pending_amount">Valor Pendente (R$)</Label>
+                        <Input
+                          id="pending_amount"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={formData.pending_amount}
+                          onChange={(e) => {
+                            const newValue = e.target.value;
+                            setFormData({ 
+                              ...formData, 
+                              pending_amount: newValue,
+                              // Se preencheu valor, sugere data de hoje + 1 dia automaticamente
+                              expected_payment_date: newValue && parseFloat(newValue) > 0 && !formData.expected_payment_date 
+                                ? format(addDays(new Date(), 1), 'yyyy-MM-dd')
+                                : formData.expected_payment_date
+                            });
                           }}
-                          locale={ptBR}
-                          initialFocus
+                          placeholder="Ex: 20.00"
+                          className="border-emerald-500/30 focus:border-emerald-500"
                         />
-                      </PopoverContent>
-                    </Popover>
-                    <p className="text-xs text-muted-foreground">
-                      Quando o cliente prometeu pagar. Útil para acompanhamento.
-                    </p>
+                        <p className="text-xs text-muted-foreground">
+                          💰 Valor que o cliente ainda deve pagar
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="expected_payment_date" className="flex items-center gap-1">
+                          <CalendarIcon className="h-3 w-3" />
+                          Data para Cobrar
+                        </Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              type="button"
+                              className={cn(
+                                "w-full justify-start text-left font-normal border-emerald-500/30",
+                                !formData.expected_payment_date && "text-muted-foreground"
+                              )}
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {formData.expected_payment_date
+                                ? format(new Date(formData.expected_payment_date + 'T12:00:00'), 'dd/MM/yyyy', { locale: ptBR })
+                                : 'Selecione a data'}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <CalendarPicker
+                              mode="single"
+                              selected={formData.expected_payment_date ? new Date(formData.expected_payment_date + 'T12:00:00') : undefined}
+                              onSelect={(date) => {
+                                if (date) {
+                                  setFormData({ ...formData, expected_payment_date: format(date, 'yyyy-MM-dd') });
+                                }
+                              }}
+                              locale={ptBR}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <p className="text-xs text-muted-foreground">
+                          🔔 Você receberá notificação para cobrar
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {formData.expected_payment_date && parseFloat(formData.pending_amount || '0') > 0 && (
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 p-2 rounded">
+                        ✅ Notificação de cobrança será enviada em {format(new Date(formData.expected_payment_date + 'T12:00:00'), "dd 'de' MMMM", { locale: ptBR })}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
