@@ -56,12 +56,13 @@ export function WhatsAppApiConfig() {
           .maybeSingle();
         
         if (!error && data) {
-          setConfig(data as WhatsAppConfig);
+          const configData = data as unknown as WhatsAppConfig;
+          setConfig(configData);
           setFormData({
-            api_url: data.api_url || '',
-            api_token: data.api_token || '',
-            instance_name: data.instance_name || '',
-            auto_send_enabled: data.auto_send_enabled || false,
+            api_url: configData.api_url || '',
+            api_token: configData.api_token || '',
+            instance_name: configData.instance_name || '',
+            auto_send_enabled: configData.auto_send_enabled || false,
           });
         }
       } catch (err) {

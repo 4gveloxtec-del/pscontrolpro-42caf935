@@ -47,13 +47,17 @@ export function ManualMessageSender({ client, onMessageSent }: ManualMessageSend
   const { data: sentNotifications } = useQuery({
     queryKey: ['client-notifications', client.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('client_notification_tracking' as any)
-        .select('*')
-        .eq('client_id', client.id)
-        .eq('expiration_cycle_date', client.expiration_date);
-      if (error && error.code !== 'PGRST116') return [];
-      return (data || []) as NotificationTracking[];
+      try {
+        const { data, error } = await supabase
+          .from('client_notification_tracking' as any)
+          .select('*')
+          .eq('client_id', client.id)
+          .eq('expiration_cycle_date', client.expiration_date);
+        if (error) return [];
+        return (data as unknown as NotificationTracking[]) || [];
+      } catch {
+        return [];
+      }
     },
     enabled: !!client.id,
   });

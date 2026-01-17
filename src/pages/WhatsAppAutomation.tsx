@@ -31,7 +31,7 @@ export default function WhatsAppAutomation() {
     
     // Fetch config
     supabase.from('whatsapp_api_config' as any).select('*').eq('user_id', user.id).maybeSingle()
-      .then(({ data }) => { if (data) setConfig(data as WhatsAppConfig); });
+      .then(({ data }) => { if (data) setConfig(data as unknown as WhatsAppConfig); });
     
     // Fetch clients/resellers
     const today = new Date();

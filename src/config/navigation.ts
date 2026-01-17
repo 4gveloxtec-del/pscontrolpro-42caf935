@@ -16,6 +16,7 @@ import {
   Globe,
   AppWindow,
   UsersRound,
+  Bot,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -62,6 +63,7 @@ export const navGroups: NavGroup[] = [
   {
     title: 'Mensagens',
     items: [
+      { title: 'Automação WhatsApp', href: '/whatsapp-automation', icon: Bot },
       { title: 'Templates', href: '/templates', icon: MessageSquare },
       { title: 'Histórico', href: '/message-history', icon: History, sellerOnly: true },
     ],

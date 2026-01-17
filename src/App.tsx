@@ -31,7 +31,7 @@ import ExternalApps from "./pages/ExternalApps";
 import ServerIcons from "./pages/ServerIcons";
 import PanelResellers from "./pages/PanelResellers";
 import AdminServerTemplates from "./pages/AdminServerTemplates";
-
+import WhatsAppAutomation from "./pages/WhatsAppAutomation";
 import MessageHistory from "./pages/MessageHistory";
 import Tutorials from "./pages/Tutorials";
 import ForcePasswordUpdate from "./pages/ForcePasswordUpdate";
@@ -104,6 +104,7 @@ const AppRoutes = () => {
           <Route path="/settings" element={<Settings />} />
           <Route path="/tutorials" element={<Tutorials />} />
           <Route path="/templates" element={<Templates />} />
+          <Route path="/whatsapp-automation" element={<WhatsAppAutomation />} />
           
           {/* Seller-only routes (revendedor) */}
           <Route path="/clients" element={<Clients />} />
