@@ -753,6 +753,22 @@ export default function Settings() {
           onClick={openAdminWhatsApp}
         />
         <SettingItem
+          icon={RefreshCw}
+          title="Limpar Cache e Recarregar"
+          description="Corrigir problemas de permissão ou dados antigos"
+          onClick={() => {
+            try {
+              localStorage.removeItem('cached_profile');
+              localStorage.removeItem('cached_role');
+              localStorage.removeItem('cached_user_id');
+              toast.success('Cache limpo! Recarregando...');
+              setTimeout(() => window.location.reload(), 500);
+            } catch {
+              window.location.reload();
+            }
+          }}
+        />
+        <SettingItem
           icon={Info}
           title="Sobre"
           description="PSControl • v1.0.0"
