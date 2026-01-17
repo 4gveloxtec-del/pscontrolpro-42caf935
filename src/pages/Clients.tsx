@@ -2128,7 +2128,7 @@ export default function Clients() {
                         {resellerApps.length > 0 && (
                           <>
                             <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                              Meus Apps (até 3)
+                              Meus Apps (até 10)
                             </div>
                             {resellerApps.map((app) => (
                               <SelectItem key={app.id} value={`reseller_${app.name}`}>
@@ -2141,7 +2141,7 @@ export default function Clients() {
                       </SelectContent>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      💡 Configure até 3 apps próprios em Configurações → Meus Aplicativos
+                      💡 Configure até 10 apps próprios em Configurações → Meus Aplicativos
                     </p>
                     
                     {/* Show input for custom app name when 'own' is selected but no reseller app chosen */}

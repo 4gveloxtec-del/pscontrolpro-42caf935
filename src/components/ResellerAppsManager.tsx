@@ -54,9 +54,9 @@ export function ResellerAppsManager({ sellerId }: ResellerAppsManagerProps) {
 
   const createMutation = useMutation({
     mutationFn: async (data: { name: string; icon: string }) => {
-      // Check if already has 3 apps
-      if (resellerApps.length >= 3) {
-        throw new Error('Limite de 3 apps atingido');
+      // Check if already has 10 apps
+      if (resellerApps.length >= 10) {
+        throw new Error('Limite de 10 apps atingido');
       }
       
       const { error } = await supabase
@@ -155,7 +155,7 @@ export function ResellerAppsManager({ sellerId }: ResellerAppsManagerProps) {
               Meus Apps (Revendedor)
             </CardTitle>
             <CardDescription>
-              Cadastre até 3 apps personalizados para usar nos clientes
+              Cadastre até 10 apps personalizados para usar nos clientes
             </CardDescription>
           </div>
           <Dialog open={isDialogOpen} onOpenChange={(open) => {
@@ -165,8 +165,8 @@ export function ResellerAppsManager({ sellerId }: ResellerAppsManagerProps) {
             <DialogTrigger asChild>
               <Button 
                 size="sm" 
-                disabled={resellerApps.length >= 3}
-                title={resellerApps.length >= 3 ? 'Limite de 3 apps atingido' : 'Adicionar novo app'}
+                disabled={resellerApps.length >= 10}
+                title={resellerApps.length >= 10 ? 'Limite de 10 apps atingido' : 'Adicionar novo app'}
               >
                 <Plus className="h-4 w-4 mr-1" />
                 Adicionar
@@ -286,7 +286,7 @@ export function ResellerAppsManager({ sellerId }: ResellerAppsManagerProps) {
               </div>
             ))}
             <p className="text-xs text-muted-foreground text-center pt-2">
-              {resellerApps.length}/3 apps cadastrados
+              {resellerApps.length}/10 apps cadastrados
             </p>
           </div>
         )}
