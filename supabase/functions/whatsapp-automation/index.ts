@@ -22,6 +22,7 @@ interface Client {
   server_name: string;
   is_paid: boolean;
   pending_amount: number;
+  expected_payment_date: string;
 }
 
 interface Profile {
@@ -140,6 +141,15 @@ function daysUntil(dateStr: string): number {
   return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+// Calculate days since date (for overdue)
+function daysSince(dateStr: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(dateStr);
+  target.setHours(0, 0, 0, 0);
+  return Math.ceil((today.getTime() - target.getTime()) / (1000 * 60 * 60 * 24));
+}
+
 // Get notification type label for push
 function getNotificationLabel(notificationType: string): { title: string; emoji: string } {
   const labels: Record<string, { title: string; emoji: string }> = {
@@ -150,6 +160,7 @@ function getNotificationLabel(notificationType: string): { title: string; emoji:
     'iptv_3_dias': { title: 'Plano Vence em 3 dias', emoji: '🟡' },
     'renovacao': { title: 'Renovação', emoji: '✅' },
     'cobranca': { title: 'Cobrança', emoji: '💰' },
+    'payment_overdue_1day': { title: 'Pagamento Atrasado (1 dia)', emoji: '⚠️' },
     'plano_vencimento': { title: 'Sua Assinatura Venceu', emoji: '🔴' },
     'plano_3_dias': { title: 'Sua Assinatura Vence em 3 dias', emoji: '🟡' },
   };
@@ -162,6 +173,18 @@ serve(async (req) => {
   }
 
   try {
+    // Check for test mode in request body
+    let testMode = false;
+    let testClientId: string | null = null;
+    
+    try {
+      const body = await req.json();
+      testMode = body?.testMode === true;
+      testClientId = body?.testClientId || null;
+    } catch {
+      // No body or invalid JSON, proceed normally
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
@@ -179,7 +202,7 @@ serve(async (req) => {
     const globalConfig: GlobalConfig | null = globalConfigData?.is_active ? globalConfigData as GlobalConfig : null;
     const isApiActive = !!globalConfig;
 
-    console.log(`WhatsApp API active: ${isApiActive}`);
+    console.log(`WhatsApp API active: ${isApiActive}, Test mode: ${testMode}`);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -194,8 +217,13 @@ serve(async (req) => {
     in30Days.setDate(in30Days.getDate() + 30);
     const in30DaysStr = in30Days.toISOString().split('T')[0];
 
+    // Calculate yesterday for payment overdue check
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
     console.log('Running WhatsApp automation...');
-    console.log(`Today: ${todayStr}, +3 days: ${in3DaysStr}, +30 days: ${in30DaysStr}`);
+    console.log(`Today: ${todayStr}, +3 days: ${in3DaysStr}, +30 days: ${in30DaysStr}, Yesterday: ${yesterdayStr}`);
 
     // Get all seller instances
     const { data: allSellerInstances } = await supabase
@@ -234,8 +262,8 @@ serve(async (req) => {
       .eq('instance_blocked', false)
       .maybeSingle();
 
-    // PART 1: Admin → Reseller notifications
-    if (adminIds.length > 0) {
+    // PART 1: Admin → Reseller notifications (skip in test mode)
+    if (adminIds.length > 0 && !testMode) {
       console.log('Processing admin to reseller notifications...');
 
       const adminId = adminIds[0];
@@ -393,7 +421,6 @@ serve(async (req) => {
         .eq('seller_id', sellerId);
 
       // Get clients expiring in relevant timeframes
-      // Also get clients with pending payments (cobrança) and recently renewed (renovação)
       const { data: clients } = await supabase
         .from('clients')
         .select('*')
@@ -411,6 +438,17 @@ serve(async (req) => {
         .not('pending_amount', 'is', null)
         .gt('pending_amount', 0);
 
+      // Get clients with payment overdue by 1 day (expected_payment_date = yesterday)
+      const { data: overdueClients } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('seller_id', sellerId)
+        .eq('is_archived', false)
+        .eq('is_paid', false)
+        .eq('expected_payment_date', yesterdayStr)
+        .not('pending_amount', 'is', null)
+        .gt('pending_amount', 0);
+
       // Combine and deduplicate
       const allClients = [...(clients || [])];
       for (const unpaid of unpaidClients || []) {
@@ -418,19 +456,37 @@ serve(async (req) => {
           allClients.push(unpaid);
         }
       }
+      for (const overdue of overdueClients || []) {
+        if (!allClients.find(c => c.id === overdue.id)) {
+          allClients.push(overdue);
+        }
+      }
 
       for (const client of allClients) {
         if (!client.phone) continue;
 
+        // In test mode, only process the specific client if provided
+        if (testMode && testClientId && client.id !== testClientId) {
+          continue;
+        }
+
         const daysLeft = daysUntil(client.expiration_date);
         const isPaidApp = client.has_paid_apps || client.category === 'Contas Premium';
         const hasUnpaidAmount = !client.is_paid && client.pending_amount > 0;
+        
+        // Check if payment is 1 day overdue
+        const paymentDaysOverdue = client.expected_payment_date ? daysSince(client.expected_payment_date) : 0;
+        const isPaymentOverdue1Day = hasUnpaidAmount && paymentDaysOverdue === 1;
 
         // Determine notification type based on days and service type
         let notificationType = '';
         let templateType = '';
 
-        if (hasUnpaidAmount && daysLeft <= 0) {
+        if (isPaymentOverdue1Day) {
+          // Payment overdue by 1 day - NEW NOTIFICATION TYPE
+          notificationType = 'payment_overdue_1day';
+          templateType = 'payment_overdue_1day';
+        } else if (hasUnpaidAmount && daysLeft <= 0) {
           // Cobrança - client expired and has pending payment
           notificationType = 'cobranca';
           templateType = 'billing';
@@ -448,18 +504,21 @@ serve(async (req) => {
           continue;
         }
 
-        // Check if notification already sent
-        const { data: existing } = await supabase
-          .from('client_notification_tracking')
-          .select('id')
-          .eq('client_id', client.id)
-          .eq('notification_type', notificationType)
-          .eq('expiration_cycle_date', client.expiration_date)
-          .maybeSingle();
+        // In test mode, skip duplicate check and don't record
+        if (!testMode) {
+          // Check if notification already sent
+          const { data: existing } = await supabase
+            .from('client_notification_tracking')
+            .select('id')
+            .eq('client_id', client.id)
+            .eq('notification_type', notificationType)
+            .eq('expiration_cycle_date', client.expiration_date)
+            .maybeSingle();
 
-        if (existing) {
-          console.log(`Notification ${notificationType} already sent to client ${client.id}`);
-          continue;
+          if (existing) {
+            console.log(`Notification ${notificationType} already sent to client ${client.id}`);
+            continue;
+          }
         }
 
         // Find appropriate template
@@ -470,23 +529,49 @@ serve(async (req) => {
 
         let sent = false;
         let sentVia = 'push';
+        let messagePreview = '';
+
+        // Prepare message variables
+        const messageVariables = {
+          nome: client.name,
+          empresa: sellerProfile?.company_name || sellerProfile?.full_name || '',
+          login: client.login || '',
+          senha: client.password || '',
+          vencimento: formatDate(client.expiration_date),
+          dias_restantes: String(daysLeft),
+          valor: String(client.plan_price || 0),
+          valor_pendente: String(client.pending_amount || 0),
+          data_pagamento: client.expected_payment_date ? formatDate(client.expected_payment_date) : '',
+          plano: client.plan_name || '',
+          servidor: client.server_name || '',
+          pix: sellerProfile?.pix_key || '',
+          servico: client.category || 'IPTV',
+        };
+
+        // Generate message preview for test mode
+        if (template) {
+          messagePreview = replaceVariables(template.message, messageVariables);
+        }
+
+        // In test mode, just return the preview without sending
+        if (testMode) {
+          results.push({
+            type: 'client',
+            seller: sellerId,
+            client: client.name,
+            phone: client.phone,
+            notificationType,
+            templateName: template?.name || 'Nenhum template encontrado',
+            messagePreview,
+            wouldSendVia: canUseApi ? 'whatsapp' : 'push',
+          });
+          totalSent++;
+          continue;
+        }
 
         // Try WhatsApp API first if seller has connected instance
         if (canUseApi && template) {
-          const message = replaceVariables(template.message, {
-            nome: client.name,
-            empresa: sellerProfile?.company_name || sellerProfile?.full_name || '',
-            login: client.login || '',
-            senha: client.password || '',
-            vencimento: formatDate(client.expiration_date),
-            dias_restantes: String(daysLeft),
-            valor: String(client.plan_price || 0),
-            valor_pendente: String(client.pending_amount || 0),
-            plano: client.plan_name || '',
-            servidor: client.server_name || '',
-            pix: sellerProfile?.pix_key || '',
-            servico: client.category || 'IPTV',
-          });
+          const message = replaceVariables(template.message, messageVariables);
 
           sent = await sendEvolutionMessage(
             globalConfig!, 
@@ -501,9 +586,15 @@ serve(async (req) => {
         // Fallback to push notification if API failed or not available
         if (!sent) {
           const { title, emoji } = getNotificationLabel(notificationType);
-          const pushBody = hasUnpaidAmount 
-            ? `${client.name} tem R$ ${client.pending_amount} pendente. Vence: ${formatDate(client.expiration_date)}`
-            : `${client.name} - ${client.plan_name || 'Plano'} - Vence: ${formatDate(client.expiration_date)}`;
+          let pushBody = '';
+          
+          if (notificationType === 'payment_overdue_1day') {
+            pushBody = `${client.name} tem R$ ${client.pending_amount} pendente há 1 dia. Data combinada: ${formatDate(client.expected_payment_date)}`;
+          } else if (hasUnpaidAmount) {
+            pushBody = `${client.name} tem R$ ${client.pending_amount} pendente. Vence: ${formatDate(client.expiration_date)}`;
+          } else {
+            pushBody = `${client.name} - ${client.plan_name || 'Plano'} - Vence: ${formatDate(client.expiration_date)}`;
+          }
           
           sent = await sendPushNotification(
             supabaseUrl,
@@ -551,7 +642,8 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: 'Automation complete',
+        message: testMode ? 'Test preview complete' : 'Automation complete',
+        testMode,
         sent: totalSent,
         whatsappSent: totalSent - pushSent,
         pushSent,

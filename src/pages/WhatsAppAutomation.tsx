@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { 
-  MessageCircle, Settings, Users, AlertTriangle, CheckCircle, Loader2, RefreshCw, Shield, Ban
+  MessageCircle, Settings, Users, AlertTriangle, CheckCircle, Loader2, RefreshCw, Shield, Ban, Eye, Clock
 } from 'lucide-react';
 import { WhatsAppGlobalConfig } from '@/components/WhatsAppGlobalConfig';
 import { WhatsAppSellerConfig } from '@/components/WhatsAppSellerConfig';
@@ -16,6 +16,13 @@ import { useWhatsAppGlobalConfig } from '@/hooks/useWhatsAppGlobalConfig';
 import { useWhatsAppSellerInstance } from '@/hooks/useWhatsAppSellerInstance';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface BlockedSeller {
   id: string;
@@ -36,6 +43,10 @@ interface BlockedSeller {
 export default function WhatsAppAutomation() {
   const { user, isAdmin } = useAuth();
   const [isRunningAutomation, setIsRunningAutomation] = useState(false);
+  const [isTestingOverdue, setIsTestingOverdue] = useState(false);
+  const [testPreviewOpen, setTestPreviewOpen] = useState(false);
+  const [testResults, setTestResults] = useState<any[]>([]);
+  const [overdueClients, setOverdueClients] = useState<any[]>([]);
   const [expiringClients, setExpiringClients] = useState<any[]>([]);
   const [expiringResellers, setExpiringResellers] = useState<any[]>([]);
   const [blockedSellers, setBlockedSellers] = useState<BlockedSeller[]>([]);
@@ -49,15 +60,28 @@ export default function WhatsAppAutomation() {
     
     // Fetch clients/resellers
     const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
     const in30Days = new Date();
     in30Days.setDate(in30Days.getDate() + 30);
 
     if (!isAdmin) {
+      // Fetch expiring clients
       supabase.from('clients').select('*').eq('seller_id', user.id).eq('is_archived', false)
         .gte('expiration_date', today.toISOString().split('T')[0])
         .lte('expiration_date', in30Days.toISOString().split('T')[0])
         .order('expiration_date')
         .then(({ data }) => setExpiringClients(data || []));
+
+      // Fetch clients with payment overdue by 1 day
+      supabase.from('clients').select('*')
+        .eq('seller_id', user.id)
+        .eq('is_archived', false)
+        .eq('is_paid', false)
+        .eq('expected_payment_date', yesterday.toISOString().split('T')[0])
+        .gt('pending_amount', 0)
+        .order('expected_payment_date')
+        .then(({ data }) => setOverdueClients(data || []));
     } else {
       const in7Days = new Date();
       in7Days.setDate(in7Days.getDate() + 7);
@@ -117,6 +141,34 @@ export default function WhatsAppAutomation() {
       toast.error('Erro: ' + error.message);
     } finally {
       setIsRunningAutomation(false);
+    }
+  };
+
+  const runTestOverdueMessage = async () => {
+    setIsTestingOverdue(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-automation', {
+        body: { testMode: true }
+      });
+      if (error) throw error;
+      
+      // Filter only payment_overdue_1day results
+      const overdueResults = (data?.results || []).filter(
+        (r: any) => r.notificationType === 'payment_overdue_1day'
+      );
+      
+      setTestResults(overdueResults);
+      setTestPreviewOpen(true);
+      
+      if (overdueResults.length === 0) {
+        toast.info('Nenhum cliente com pagamento atrasado em 1 dia encontrado.');
+      } else {
+        toast.success(`Preview gerado para ${overdueResults.length} cliente(s) com pagamento atrasado.`);
+      }
+    } catch (error: any) {
+      toast.error('Erro: ' + error.message);
+    } finally {
+      setIsTestingOverdue(false);
     }
   };
 
@@ -225,6 +277,52 @@ export default function WhatsAppAutomation() {
             </div>
           ) : (
             <div className="grid gap-6">
+              {/* Payment Overdue 1 Day - NEW SECTION */}
+              <Card className="border-orange-500/30">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-orange-500 flex items-center gap-2">
+                      <Clock className="h-5 w-5" />
+                      Pagamento Atrasado 1 Dia ({overdueClients.length})
+                    </CardTitle>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={runTestOverdueMessage}
+                      disabled={isTestingOverdue}
+                      className="border-orange-500/50 text-orange-500 hover:bg-orange-500/10"
+                    >
+                      {isTestingOverdue ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Eye className="h-4 w-4 mr-2" />
+                      )}
+                      Testar Mensagem
+                    </Button>
+                  </div>
+                  <CardDescription>
+                    Clientes que não pagaram e a data combinada foi ontem
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {overdueClients.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Nenhum cliente com pagamento atrasado em 1 dia</p>
+                  ) : (
+                    overdueClients.map((client) => (
+                      <div key={client.id} className="flex items-center justify-between p-3 rounded-lg border border-orange-500/20 bg-orange-500/5">
+                        <div>
+                          <p className="font-medium">{client.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            R$ {client.pending_amount?.toFixed(2)} pendente • Data combinada: {format(new Date(client.expected_payment_date), 'dd/MM/yyyy', { locale: ptBR })}
+                          </p>
+                        </div>
+                        <ManualMessageSender client={client} />
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+
               <Card className="border-destructive/30">
                 <CardHeader className="pb-3"><CardTitle className="text-destructive">Vencendo Hoje ({groupedClients.today.length})</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
@@ -396,6 +494,49 @@ export default function WhatsAppAutomation() {
           </TabsContent>
         )}
       </Tabs>
+
+      {/* Test Preview Dialog */}
+      <Dialog open={testPreviewOpen} onOpenChange={setTestPreviewOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-orange-500" />
+              Preview: Mensagem de Pagamento Atrasado
+            </DialogTitle>
+            <DialogDescription>
+              Veja como a mensagem ficará para clientes com pagamento atrasado em 1 dia
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {testResults.length === 0 ? (
+              <p className="text-muted-foreground text-center py-6">
+                Nenhum cliente com pagamento atrasado em 1 dia encontrado.
+              </p>
+            ) : (
+              testResults.map((result, index) => (
+                <Card key={index} className="border-orange-500/30">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-base flex items-center justify-between">
+                      <span>{result.client}</span>
+                      <Badge variant="outline" className="text-orange-500 border-orange-500/50">
+                        {result.wouldSendVia === 'whatsapp' ? 'WhatsApp' : 'Push'}
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      Template: {result.templateName}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="bg-muted/50 rounded-lg p-4 whitespace-pre-wrap text-sm">
+                      {result.messagePreview || 'Template não encontrado'}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
