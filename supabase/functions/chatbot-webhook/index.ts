@@ -647,79 +647,157 @@ serve(async (req) => {
     // Diagnostic endpoint: GET request returns debug info
     if (req.method === "GET") {
       const url = new URL(req.url);
+
       const testApi = url.searchParams.get("test_api") === "true";
-      
+      const testSend = url.searchParams.get("test_send") === "true";
+      const testPhone = url.searchParams.get("phone") || "";
+      const testText = url.searchParams.get("text") || "Teste do chatbot";
+      const testInstance = url.searchParams.get("instance") || "";
+
       const { data: instances } = await supabase
         .from("whatsapp_seller_instances")
         .select("instance_name, seller_id, is_connected, instance_blocked, plan_status");
-      
-      const { data: globalConfig } = await supabase
+
+      // Always read the most recently updated config row (some projects accidentally create multiple rows)
+      const {
+        data: globalConfig,
+        error: globalConfigError,
+      } = await supabase
         .from("whatsapp_global_config")
-        .select("api_url, api_token, is_active")
+        .select("api_url, api_token, is_active, updated_at")
+        .order("updated_at", { ascending: false })
+        .limit(1)
         .maybeSingle();
-      
+
       const { data: chatbotSettings } = await supabase
         .from("chatbot_settings")
         .select("seller_id, is_enabled");
-      
+
       const { data: chatbotRules } = await supabase
         .from("chatbot_rules")
         .select("seller_id, name, is_active, trigger_text, response_type");
-      
+
       let apiTestResult: any = null;
-      
+      let sendTestResult: any = null;
+
+      const configOk = Boolean(globalConfig?.api_url && globalConfig?.api_token);
+
       // Test API connection if requested
-      if (testApi && globalConfig?.api_url && globalConfig?.api_token) {
+      if (testApi && configOk) {
         try {
-          const baseUrl = normalizeApiUrl(globalConfig.api_url);
+          const baseUrl = normalizeApiUrl(globalConfig!.api_url);
           const testUrl = `${baseUrl}/instance/fetchInstances`;
-          
+
           console.log(`[API Test] Testing URL: ${testUrl}`);
-          console.log(`[API Test] Token (first 10 chars): ${globalConfig.api_token.substring(0, 10)}...`);
-          
+          console.log(`[API Test] Token length: ${globalConfig!.api_token.length}`);
+
           const testResponse = await fetch(testUrl, {
             method: "GET",
             headers: {
-              "apikey": globalConfig.api_token,
+              apikey: globalConfig!.api_token.trim(),
             },
           });
-          
+
           const testResponseText = await testResponse.text();
           console.log(`[API Test] Response status: ${testResponse.status}`);
           console.log(`[API Test] Response body: ${testResponseText.substring(0, 500)}`);
-          
+
           apiTestResult = {
             url_tested: testUrl,
             status: testResponse.status,
             status_text: testResponse.statusText,
             is_ok: testResponse.ok,
             response_preview: testResponseText.substring(0, 300),
-            token_first_chars: globalConfig.api_token.substring(0, 10) + "...",
-            token_length: globalConfig.api_token.length,
+            token_length: globalConfig!.api_token.length,
           };
         } catch (error: any) {
           apiTestResult = {
             error: error.message,
-            url_configured: globalConfig.api_url,
+            url_configured: globalConfig?.api_url,
           };
         }
       }
-      
-      return new Response(JSON.stringify({
-        status: "diagnostic",
-        instances: instances || [],
-        globalConfig: globalConfig ? { 
-          api_url: globalConfig.api_url, 
-          is_active: globalConfig.is_active,
-          token_configured: !!globalConfig.api_token,
-          token_length: globalConfig.api_token?.length || 0,
-        } : null,
-        chatbotSettings: chatbotSettings || [],
-        chatbotRules: chatbotRules || [],
-        apiTestResult,
-      }, null, 2), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+
+      // Test sending a text message (does NOT expose token; requires explicit phone)
+      if (testSend && configOk) {
+        const instanceToUse =
+          testInstance ||
+          instances?.find((i: any) => !i.instance_blocked)?.instance_name ||
+          "";
+
+        if (!instanceToUse) {
+          sendTestResult = { error: "Nenhuma instância disponível para teste" };
+        } else if (!testPhone) {
+          sendTestResult = { error: "Informe o parâmetro ?phone=5511... para testar envio" };
+        } else {
+          try {
+            const baseUrl = normalizeApiUrl(globalConfig!.api_url);
+            const urlSend = `${baseUrl}/message/sendText/${instanceToUse}`;
+            const formattedPhone = formatPhone(testPhone);
+
+            console.log(`[Send Test] Testing sendText URL: ${urlSend}`);
+            console.log(`[Send Test] Phone: ${formattedPhone}`);
+            console.log(`[Send Test] Instance: ${instanceToUse}`);
+
+            const r = await fetch(urlSend, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: globalConfig!.api_token.trim(),
+              },
+              body: JSON.stringify({ number: formattedPhone, text: testText }),
+            });
+
+            const bodyText = await r.text();
+            sendTestResult = {
+              url_tested: urlSend,
+              status: r.status,
+              status_text: r.statusText,
+              is_ok: r.ok,
+              response_preview: bodyText.substring(0, 500),
+              instance_used: instanceToUse,
+              phone_used: formattedPhone,
+            };
+          } catch (e: any) {
+            sendTestResult = { error: e.message };
+          }
+        }
+      }
+
+      return new Response(
+        JSON.stringify(
+          {
+            status: "diagnostic",
+            query: {
+              test_api: url.searchParams.get("test_api"),
+              test_send: url.searchParams.get("test_send"),
+              instance: url.searchParams.get("instance"),
+              phone: Boolean(url.searchParams.get("phone")),
+              text: url.searchParams.get("text") ? "(provided)" : "(default)",
+            },
+            instances: instances || [],
+            globalConfig: globalConfig
+              ? {
+                  api_url: globalConfig.api_url,
+                  is_active: globalConfig.is_active,
+                  token_configured: Boolean(globalConfig.api_token),
+                  token_length: globalConfig.api_token?.length || 0,
+                  selected_row_is_latest: true,
+                }
+              : null,
+            globalConfigError: globalConfigError?.message || null,
+            chatbotSettings: chatbotSettings || [],
+            chatbotRules: chatbotRules || [],
+            apiTestResult,
+            sendTestResult,
+          },
+          null,
+          2
+        ),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     // Parse webhook payload (normalize across versions)
