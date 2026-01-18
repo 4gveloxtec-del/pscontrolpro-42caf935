@@ -220,13 +220,27 @@ export function WhatsAppSellerConfig() {
     }
   };
 
-  // Test message
+  // Test message with input validation
   const sendTestMessage = async () => {
     const phone = prompt('Digite o número para teste (com DDD):');
     if (!phone) return;
 
+    // SECURITY: Validate phone number format
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+      toast.error('Número de telefone inválido. Use apenas números com DDD.');
+      return;
+    }
+
     if (!globalConfig?.api_url || !globalConfig?.api_token) {
       toast.error('API global não configurada');
+      return;
+    }
+
+    // SECURITY: Validate instance name
+    const safeInstanceName = formData.instance_name.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (safeInstanceName !== formData.instance_name) {
+      toast.error('Nome da instância contém caracteres inválidos');
       return;
     }
 
@@ -237,9 +251,9 @@ export function WhatsAppSellerConfig() {
           config: {
             api_url: globalConfig.api_url,
             api_token: globalConfig.api_token,
-            instance_name: formData.instance_name,
+            instance_name: safeInstanceName,
           },
-          phone,
+          phone: cleanPhone,
           message: '✅ Mensagem de teste do sistema!',
         },
       });

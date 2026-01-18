@@ -82,7 +82,7 @@ export function useOfflineClients() {
     }
   }, []);
 
-  // Sync clients from server
+  // Sync clients from server - SECURITY: Don't cache sensitive credentials
   const syncClients = useCallback(async () => {
     if (!user || isOffline) return;
 
@@ -99,8 +99,6 @@ export function useOfflineClients() {
           plan_name,
           plan_price,
           server_name,
-          login,
-          password,
           category,
           is_paid,
           notes,
@@ -114,9 +112,14 @@ export function useOfflineClients() {
       if (error) throw error;
 
       if (data) {
-        setClients(data);
-        saveToCache(data);
-        // Sync silently - no toast notification
+        // SECURITY: Remove login/password from cached data
+        const safeData = data.map(client => ({
+          ...client,
+          login: null,
+          password: null,
+        }));
+        setClients(safeData as Client[]);
+        saveToCache(safeData as Client[]);
       }
     } catch (error) {
       console.error('Error syncing clients:', error);
