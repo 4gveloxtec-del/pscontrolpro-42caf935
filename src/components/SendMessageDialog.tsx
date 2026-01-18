@@ -685,17 +685,31 @@ export function SendMessageDialog({ client, open, onOpenChange, onMessageSent }:
     try {
       const phoneNumber = client.phone.replace(/\D/g, '');
       
-      // Call evolution-api edge function
+      // Call evolution-api edge function with correct parameters
       const { data, error } = await supabase.functions.invoke('evolution-api', {
         body: {
-          action: 'send-message',
-          instanceName: sellerInstance?.instance_name,
+          action: 'send_message',
+          userId: user?.id,
           phone: phoneNumber,
           message: message,
+          config: {
+            api_url: globalConfig?.api_url,
+            api_token: globalConfig?.api_token,
+            instance_name: sellerInstance?.instance_name,
+          },
         },
       });
 
       if (error) throw error;
+      
+      if (data?.blocked) {
+        toast.error('Instância bloqueada: ' + (data.error || 'Entre em contato com o suporte'));
+        return;
+      }
+      
+      if (!data?.success) {
+        throw new Error(data?.error || 'Falha ao enviar mensagem');
+      }
 
       // Save to history
       await saveHistoryMutation.mutateAsync({
