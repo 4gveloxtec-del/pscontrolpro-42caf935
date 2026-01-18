@@ -161,17 +161,32 @@ export function useRenewalMutation(userId: string | undefined) {
       const phoneNumber = data.clientPhone.replace(/\D/g, '');
 
       // Send via Evolution API
-      const { error } = await supabase.functions.invoke('evolution-api', {
+      const { data: apiResponse, error } = await supabase.functions.invoke('evolution-api', {
         body: {
-          action: 'send-message',
-          instanceName: sellerInstance?.instance_name,
+          action: 'send_message',
+          userId: userId,
           phone: phoneNumber,
           message: message,
+          config: {
+            api_url: globalConfig?.api_url,
+            api_token: globalConfig?.api_token,
+            instance_name: sellerInstance?.instance_name,
+          },
         },
       });
 
+      if (apiResponse?.blocked) {
+        console.error('[Renewal] Instance blocked:', apiResponse.reason);
+        return;
+      }
+
+      if (!apiResponse?.success) {
+        console.error('[Renewal] Message send failed:', apiResponse?.error);
+        return;
+      }
+
       if (error) {
-        console.error('[Renewal] Error sending message:', error);
+        console.error('[Renewal] Error invoking function:', error);
         return;
       }
 
