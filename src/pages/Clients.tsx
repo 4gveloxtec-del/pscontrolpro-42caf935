@@ -1547,11 +1547,13 @@ export default function Clients() {
     await executeRenewal({
       clientId: clientToRenew.id,
       clientName: clientToRenew.name,
+      clientPhone: clientToRenew.phone,
+      clientCategory: clientToRenew.category,
       currentExpirationDate: clientToRenew.expiration_date,
       durationDays: days,
       planId: renewPlanId !== clientToRenew.plan_id ? selectedPlan?.id || null : undefined,
-      planName: renewPlanId !== clientToRenew.plan_id ? selectedPlan?.name || null : undefined,
-      planPrice: renewPlanId !== clientToRenew.plan_id ? selectedPlan?.price || null : undefined,
+      planName: renewPlanId !== clientToRenew.plan_id ? selectedPlan?.name || clientToRenew.plan_name : clientToRenew.plan_name,
+      planPrice: renewPlanId !== clientToRenew.plan_id ? selectedPlan?.price || clientToRenew.plan_price : clientToRenew.plan_price,
     });
   };
 
@@ -3573,8 +3575,12 @@ export default function Clients() {
                       onClick={() => executeRenewal({
                         clientId: client.id,
                         clientName: client.name,
+                        clientPhone: client.phone,
+                        clientCategory: client.category,
                         currentExpirationDate: client.expiration_date,
                         durationDays: 1,
+                        planName: client.plan_name,
+                        planPrice: client.plan_price,
                       })}
                     >
                       +1 dia

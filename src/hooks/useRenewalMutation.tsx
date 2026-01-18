@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { format, addDays, isAfter } from 'date-fns';
@@ -7,10 +7,12 @@ import { format, addDays, isAfter } from 'date-fns';
 interface RenewalData {
   clientId: string;
   clientName: string;
-  currentExpirationDate: string;
-  planId?: string | null;
+  clientPhone?: string | null;
+  clientCategory?: string | null;
   planName?: string | null;
   planPrice?: number | null;
+  currentExpirationDate: string;
+  planId?: string | null;
   durationDays: number;
 }
 
@@ -48,6 +50,158 @@ export function useRenewalMutation(userId: string | undefined) {
   const queryClient = useQueryClient();
   const [isRenewing, setIsRenewing] = useState(false);
   const renewalLockRef = useRef<Set<string>>(new Set());
+
+  // Check if WhatsApp API is available
+  const { data: sellerInstance } = useQuery({
+    queryKey: ['whatsapp-seller-instance-renewal', userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('whatsapp_seller_instances')
+        .select('*')
+        .eq('seller_id', userId!)
+        .single();
+      if (error && error.code !== 'PGRST116') throw error;
+      return data;
+    },
+    enabled: !!userId,
+    staleTime: 30000,
+  });
+
+  const { data: globalConfig } = useQuery({
+    queryKey: ['whatsapp-global-config-renewal'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('whatsapp_global_config')
+        .select('*')
+        .eq('is_active', true)
+        .single();
+      if (error && error.code !== 'PGRST116') throw error;
+      return data;
+    },
+    staleTime: 30000,
+  });
+
+  const { data: sellerProfile } = useQuery({
+    queryKey: ['seller-profile-renewal', userId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('company_name, full_name, pix_key')
+        .eq('id', userId!)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!userId,
+    staleTime: 30000,
+  });
+
+  const canSendViaApi = !!(
+    sellerInstance?.is_connected &&
+    !sellerInstance?.instance_blocked &&
+    globalConfig?.is_active
+  );
+
+  // Function to send renewal confirmation via WhatsApp API
+  const sendRenewalConfirmation = useCallback(async (
+    data: RenewalData,
+    newExpirationDate: string
+  ) => {
+    if (!canSendViaApi || !data.clientPhone) {
+      console.log('[Renewal] Cannot send via API - not connected or no phone');
+      return;
+    }
+
+    try {
+      // Get renewal template
+      const categoryName = typeof data.clientCategory === 'object' 
+        ? (data.clientCategory as any)?.name 
+        : data.clientCategory;
+      
+      const categoryPrefix = categoryName?.toLowerCase() || '';
+      
+      const { data: templates } = await supabase
+        .from('whatsapp_templates')
+        .select('*')
+        .eq('seller_id', userId!)
+        .or(`type.ilike.%renov%,name.ilike.%renov%,type.ilike.%confirmacao%,name.ilike.%confirmacao%`)
+        .order('created_at', { ascending: false });
+
+      // Find best matching template
+      let template = templates?.find(t => 
+        t.name.toLowerCase().includes(categoryPrefix) && 
+        (t.name.toLowerCase().includes('renov') || t.name.toLowerCase().includes('confirmação'))
+      );
+
+      // Fallback to any renewal template
+      if (!template) {
+        template = templates?.find(t => 
+          t.type?.toLowerCase().includes('renov') || 
+          t.name.toLowerCase().includes('renov') ||
+          t.name.toLowerCase().includes('confirmação')
+        );
+      }
+
+      if (!template) {
+        console.log('[Renewal] No renewal template found');
+        return;
+      }
+
+      // Replace variables in template
+      const empresa = sellerProfile?.company_name || sellerProfile?.full_name || '';
+      const message = template.message
+        .replace(/{nome}/gi, data.clientName)
+        .replace(/{vencimento}/gi, format(new Date(newExpirationDate), 'dd/MM/yyyy'))
+        .replace(/{plano}/gi, data.planName || '')
+        .replace(/{valor}/gi, data.planPrice?.toFixed(2) || '0.00')
+        .replace(/{preco}/gi, data.planPrice?.toFixed(2) || '0.00')
+        .replace(/{empresa}/gi, empresa)
+        .replace(/{pix}/gi, sellerProfile?.pix_key || '');
+
+      const phoneNumber = data.clientPhone.replace(/\D/g, '');
+
+      // Send via Evolution API
+      const { error } = await supabase.functions.invoke('evolution-api', {
+        body: {
+          action: 'send-message',
+          instanceName: sellerInstance?.instance_name,
+          phone: phoneNumber,
+          message: message,
+        },
+      });
+
+      if (error) {
+        console.error('[Renewal] Error sending message:', error);
+        return;
+      }
+
+      // Log to message history
+      await supabase.from('message_history').insert({
+        seller_id: userId!,
+        client_id: data.clientId,
+        template_id: template.id,
+        message_type: 'renewal_confirmation',
+        message_content: message,
+        phone: phoneNumber,
+      });
+
+      // Track notification
+      await supabase.from('client_notification_tracking').insert({
+        client_id: data.clientId,
+        seller_id: userId!,
+        notification_type: 'renewal_confirmation',
+        expiration_cycle_date: newExpirationDate,
+        sent_via: 'api',
+        service_type: 'main',
+      });
+
+      console.log('[Renewal] Confirmation message sent successfully');
+      toast.success('Mensagem de renovação enviada!', { duration: 2000 });
+    } catch (error) {
+      console.error('[Renewal] Failed to send confirmation:', error);
+      // Don't show error to user - renewal was successful, message is optional
+    }
+  }, [canSendViaApi, userId, sellerInstance?.instance_name, sellerProfile]);
 
   // Helper to calculate new expiration date
   const calculateNewExpiration = useCallback((currentExpiration: string, durationDays: number): string => {
@@ -151,6 +305,13 @@ export function useRenewalMutation(userId: string | undefined) {
     onSuccess: (result, data) => {
       // Invalidate to ensure fresh data
       queryClient.invalidateQueries({ queryKey: ['clients'] });
+      
+      // Send renewal confirmation via WhatsApp API (background, non-blocking)
+      if (result.newExpirationDate) {
+        sendRenewalConfirmation(data, result.newExpirationDate).catch(() => {
+          // Silent fail - renewal was successful
+        });
+      }
       
       // Show success feedback
       toast.success(`${data.clientName} renovado até ${format(new Date(result.newExpirationDate!), 'dd/MM/yyyy')}`, {
