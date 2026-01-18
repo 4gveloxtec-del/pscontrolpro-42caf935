@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { ServerCreditClients } from '@/components/ServerCreditClients';
 import { ServerAppsManager } from '@/components/ServerAppsManager';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { BulkImportServers } from '@/components/BulkImportServers';
 
 interface ServerData {
   id: string;
@@ -63,7 +64,7 @@ const normalizeServerName = (name: string): string => {
 };
 
 export default function Servers() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<ServerData | null>(null);
@@ -117,6 +118,20 @@ export default function Servers() {
         urls[normalized] = item.value;
       });
       return urls;
+    },
+  });
+
+  // Check if bulk import is enabled for resellers
+  const { data: bulkImportEnabled = false } = useQuery({
+    queryKey: ['bulk-server-import-enabled'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('value')
+        .eq('key', 'bulk_server_import_enabled')
+        .maybeSingle();
+      if (error) return false;
+      return data?.value === 'true';
     },
   });
 
@@ -363,6 +378,10 @@ export default function Servers() {
           <h1 className="text-3xl font-bold tracking-tight">Servidores</h1>
           <p className="text-muted-foreground">Gerencie seus servidores, custos e créditos</p>
         </div>
+
+        <div className="flex gap-2">
+          {/* Bulk import - only show if admin or if enabled for resellers */}
+          {(isAdmin || bulkImportEnabled) && <BulkImportServers />}
 
         <Dialog open={isDialogOpen} onOpenChange={(open) => {
           if (!open && (createMutation.isPending || updateMutation.isPending)) {
@@ -714,6 +733,7 @@ export default function Servers() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {/* Summary Cards */}

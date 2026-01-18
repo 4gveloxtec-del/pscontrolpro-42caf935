@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Plus, Trash2, Edit, Server, Image, ExternalLink, Link } from "lucide-react";
+import { Plus, Trash2, Edit, Server, Image, ExternalLink, Link, Upload } from "lucide-react";
 
 interface ServerTemplate {
   id: string;
@@ -48,6 +49,41 @@ const AdminServerTemplates = () => {
   const [formData, setFormData] = useState({ name: '', icon_url: '', panel_url: '' });
 
   const { data: templates = [], isLoading } = useAdminServerTemplates();
+
+  // Fetch bulk import enabled setting
+  const { data: bulkImportEnabled = false } = useQuery({
+    queryKey: ['bulk-server-import-enabled'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('app_settings')
+        .select('value')
+        .eq('key', 'bulk_server_import_enabled')
+        .maybeSingle();
+      if (error) return false;
+      return data?.value === 'true';
+    },
+  });
+
+  // Mutation to toggle bulk import setting
+  const toggleBulkImportMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert({
+          key: 'bulk_server_import_enabled',
+          value: enabled ? 'true' : 'false',
+          description: 'Habilita importação em massa de servidores para revendedores',
+        }, { onConflict: 'key' });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['bulk-server-import-enabled'] });
+      toast.success('Configuração atualizada!');
+    },
+    onError: () => {
+      toast.error('Erro ao atualizar configuração');
+    },
+  });
 
   const createMutation = useMutation({
     mutationFn: async (data: { name: string; icon_url: string; panel_url: string }) => {
@@ -217,6 +253,30 @@ const AdminServerTemplates = () => {
 
   return (
     <div className="space-y-6">
+      {/* Bulk Import Toggle */}
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Upload className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-medium">Importação em Massa para Revendedores</h3>
+                <p className="text-sm text-muted-foreground">
+                  Quando ativo, revendedores podem importar servidores em massa
+                </p>
+              </div>
+            </div>
+            <Switch 
+              checked={bulkImportEnabled}
+              onCheckedChange={(checked) => toggleBulkImportMutation.mutate(checked)}
+              disabled={toggleBulkImportMutation.isPending}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Templates de Servidores</h1>
