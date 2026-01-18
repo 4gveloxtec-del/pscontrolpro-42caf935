@@ -14,7 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Bot, Plus, Settings, MessageSquare, Users, History, Pencil, Trash2, Copy, Zap, Image, List, LayoutGrid, Loader2, AlertCircle, CheckCircle2, Folder, GitBranch } from 'lucide-react';
 import { useChatbotRules, ChatbotRule, ChatbotTemplate } from '@/hooks/useChatbotRules';
-import { useChatbotCategories } from '@/hooks/useChatbotCategories';
+import { useChatbotCategories, ChatbotCategory } from '@/hooks/useChatbotCategories';
 import { ChatbotCategories } from '@/components/ChatbotCategories';
 import { ChatbotFlowManager } from '@/components/ChatbotFlowManager';
 import { useAuth } from '@/hooks/useAuth';
@@ -43,7 +43,7 @@ const RESPONSE_TYPES = {
 };
 
 export default function Chatbot() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const {
     rules,
     templates,
@@ -69,6 +69,19 @@ export default function Chatbot() {
   const [editingTemplate, setEditingTemplate] = useState<ChatbotTemplate | null>(null);
   const [deletingItem, setDeletingItem] = useState<{ type: 'rule' | 'template'; id: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [templateCategoryFilter, setTemplateCategoryFilter] = useState<string>('all');
+  const [templateFormCategory, setTemplateFormCategory] = useState<string>('');
+
+  // Categories hook
+  const { categories } = useChatbotCategories();
+
+  // Filter templates based on category
+  const filteredTemplates = templates.filter(template => {
+    if (templateCategoryFilter === 'all') return true;
+    if (templateCategoryFilter === 'admin') return template.seller_id === null;
+    if (templateCategoryFilter === 'mine') return template.seller_id === user?.id;
+    return template.category === templateCategoryFilter;
+  });
 
   // Form state
   const [formData, setFormData] = useState<Partial<ChatbotRule>>({
@@ -200,6 +213,32 @@ export default function Chatbot() {
         await createTemplate(formData as Omit<ChatbotTemplate, 'id' | 'created_by' | 'created_at'>);
       }
       setShowTemplateDialog(false);
+      resetForm();
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveTemplateWithCategory = async () => {
+    if (!formData.name || !formData.trigger_text || !formData.response_content?.text) {
+      toast.error('Preencha todos os campos obrigatórios');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const templateData = {
+        ...formData,
+        category: templateFormCategory || undefined,
+      };
+      
+      if (editingTemplate) {
+        await updateTemplate(editingTemplate.id, templateData as Partial<ChatbotTemplate>);
+      } else {
+        await createTemplate(templateData as Omit<ChatbotTemplate, 'id' | 'created_by' | 'created_at'>);
+      }
+      setShowTemplateDialog(false);
+      setTemplateFormCategory('');
       resetForm();
     } finally {
       setIsSaving(false);
@@ -443,92 +482,127 @@ export default function Chatbot() {
 
         {/* Templates Tab */}
         <TabsContent value="templates" className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <h2 className="text-lg font-semibold">Templates Disponíveis</h2>
-            {isAdmin && (
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Select 
+                value={templateCategoryFilter} 
+                onValueChange={setTemplateCategoryFilter}
+              >
+                <SelectTrigger className="w-full sm:w-[180px]">
+                  <SelectValue placeholder="Filtrar categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as categorias</SelectItem>
+                  <SelectItem value="admin">Templates do Admin</SelectItem>
+                  <SelectItem value="mine">Meus Templates</SelectItem>
+                  {categories.filter(c => c.is_active).map((cat) => (
+                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button onClick={() => { resetForm(); setShowTemplateDialog(true); }}>
                 <Plus className="h-4 w-4 mr-2" />
                 Novo Template
               </Button>
-            )}
+            </div>
           </div>
 
-          {templates.length === 0 ? (
+          {filteredTemplates.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center justify-center py-12">
                 <Copy className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-medium mb-2">Nenhum template disponível</h3>
                 <p className="text-muted-foreground text-center">
-                  {isAdmin ? 'Crie templates para seus revendedores usarem' : 'Aguarde o administrador criar templates'}
+                  {templateCategoryFilter !== 'all' ? 'Nenhum template nesta categoria' : 'Crie seu primeiro template ou aguarde o administrador'}
                 </p>
+                <Button className="mt-4" onClick={() => { resetForm(); setShowTemplateDialog(true); }}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Criar Template
+                </Button>
               </CardContent>
             </Card>
           ) : (
             <div className="grid gap-4 md:grid-cols-2">
-              {templates.map((template) => (
-                <Card key={template.id} className={!template.is_active ? 'opacity-60' : ''}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <CardTitle className="text-base">{template.name}</CardTitle>
-                        {template.description && (
-                          <CardDescription>{template.description}</CardDescription>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {isAdmin && (
-                          <div className="flex items-center gap-2 mr-2">
-                            <Switch
-                              checked={template.is_active}
-                              onCheckedChange={async (checked) => {
-                                await updateTemplate(template.id, { is_active: checked });
-                              }}
-                            />
-                            <span className={`text-xs font-medium ${template.is_active ? 'text-green-600' : 'text-muted-foreground'}`}>
-                              {template.is_active ? 'Ativo' : 'Inativo'}
-                            </span>
+              {filteredTemplates.map((template) => {
+                const isOwn = template.seller_id === user?.id;
+                const isAdminTemplate = template.seller_id === null;
+                const canManage = isOwn || (isAdmin && isAdminTemplate);
+                const categoryName = categories.find(c => c.id === template.category)?.name;
+                
+                return (
+                  <Card key={template.id} className={!template.is_active ? 'opacity-60' : ''}>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <CardTitle className="text-base">{template.name}</CardTitle>
+                            {isAdminTemplate && (
+                              <Badge variant="secondary" className="text-xs">Admin</Badge>
+                            )}
                           </div>
-                        )}
-                        {isAdmin && (
-                          <>
-                            <Button variant="ghost" size="icon" onClick={() => openEditTemplate(template)}>
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => { setDeletingItem({ type: 'template', id: template.id }); setShowDeleteDialog(true); }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </>
-                        )}
+                          {template.description && (
+                            <CardDescription>{template.description}</CardDescription>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {canManage && (
+                            <div className="flex items-center gap-2 mr-2">
+                              <Switch
+                                checked={template.is_active}
+                                onCheckedChange={async (checked) => {
+                                  await updateTemplate(template.id, { is_active: checked });
+                                }}
+                              />
+                              <span className={`text-xs font-medium ${template.is_active ? 'text-green-600' : 'text-muted-foreground'}`}>
+                                {template.is_active ? 'Ativo' : 'Inativo'}
+                              </span>
+                            </div>
+                          )}
+                          {canManage && (
+                            <>
+                              <Button variant="ghost" size="icon" onClick={() => openEditTemplate(template)}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => { setDeletingItem({ type: 'template', id: template.id }); setShowDeleteDialog(true); }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline">{COOLDOWN_MODES[template.cooldown_mode]?.asterisks}</Badge>
-                        <Badge variant="outline">{RESPONSE_TYPES[template.response_type]?.label}</Badge>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant="outline">{COOLDOWN_MODES[template.cooldown_mode]?.asterisks}</Badge>
+                          <Badge variant="outline">{RESPONSE_TYPES[template.response_type]?.label}</Badge>
+                          {categoryName && (
+                            <Badge variant="secondary">{categoryName}</Badge>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground line-clamp-2">
+                          {template.response_content.text}
+                        </p>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="w-full mt-2"
+                          onClick={() => handleUseTemplate(template)}
+                          disabled={isSaving || !template.is_active}
+                        >
+                          {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+                          Usar Template
+                        </Button>
                       </div>
-                      <p className="text-sm text-muted-foreground line-clamp-2">
-                        {template.response_content.text}
-                      </p>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        className="w-full mt-2"
-                        onClick={() => handleUseTemplate(template)}
-                        disabled={isSaving || !template.is_active}
-                      >
-                        {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-                        Usar Template
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </TabsContent>
@@ -936,13 +1010,13 @@ export default function Chatbot() {
         </DialogContent>
       </Dialog>
 
-      {/* Template Dialog (Admin only) */}
+      {/* Template Dialog */}
       <Dialog open={showTemplateDialog} onOpenChange={setShowTemplateDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingTemplate ? 'Editar Template' : 'Novo Template'}</DialogTitle>
             <DialogDescription>
-              Templates ficam disponíveis para todos os revendedores
+              {isAdmin ? 'Templates globais ficam disponíveis para todos os revendedores' : 'Crie templates para usar no seu chatbot'}
             </DialogDescription>
           </DialogHeader>
 
@@ -956,13 +1030,33 @@ export default function Chatbot() {
               />
             </div>
 
-            <div>
-              <Label>Gatilho Sugerido *</Label>
-              <Input
-                value={formData.trigger_text}
-                onChange={(e) => setFormData(prev => ({ ...prev, trigger_text: e.target.value }))}
-                placeholder="Ex: oi, olá, *"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label>Gatilho Sugerido *</Label>
+                <Input
+                  value={formData.trigger_text}
+                  onChange={(e) => setFormData(prev => ({ ...prev, trigger_text: e.target.value }))}
+                  placeholder="Ex: oi, olá, *"
+                />
+              </div>
+
+              <div>
+                <Label>Categoria</Label>
+                <Select
+                  value={templateFormCategory}
+                  onValueChange={setTemplateFormCategory}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">Sem categoria</SelectItem>
+                    {categories.filter(c => c.is_active).map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -1027,7 +1121,7 @@ export default function Chatbot() {
             <Button variant="outline" onClick={() => setShowTemplateDialog(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleSaveTemplate} disabled={isSaving}>
+            <Button onClick={handleSaveTemplateWithCategory} disabled={isSaving}>
               {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
               {editingTemplate ? 'Salvar' : 'Criar'}
             </Button>

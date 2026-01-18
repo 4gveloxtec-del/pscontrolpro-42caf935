@@ -121,6 +121,42 @@ interface ChatbotRule {
   priority: number;
 }
 
+interface ChatbotFlow {
+  id: string;
+  seller_id: string;
+  name: string;
+  is_active: boolean;
+  is_main_menu: boolean;
+}
+
+interface ChatbotFlowNode {
+  id: string;
+  flow_id: string;
+  seller_id: string;
+  parent_node_id: string | null;
+  option_number: string;
+  title: string;
+  description: string | null;
+  response_type: string;
+  response_content: {
+    text: string;
+    image_url?: string;
+  };
+  template_id: string | null;
+  sort_order: number;
+  is_active: boolean;
+}
+
+interface ChatbotFlowSession {
+  id: string;
+  seller_id: string;
+  contact_phone: string;
+  current_flow_id: string | null;
+  current_node_id: string | null;
+  is_active: boolean;
+  awaiting_human: boolean;
+}
+
 interface ChatbotContact {
   id: string;
   seller_id: string;
@@ -308,6 +344,235 @@ function findMatchingRule(
   return null;
 }
 
+// Helper: Get or create flow session for contact
+async function getFlowSession(
+  supabase: any,
+  sellerId: string,
+  phone: string
+): Promise<ChatbotFlowSession | null> {
+  const { data } = await supabase
+    .from("chatbot_flow_sessions")
+    .select("*")
+    .eq("seller_id", sellerId)
+    .eq("contact_phone", phone)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  return data;
+}
+
+// Helper: Build menu text from flow nodes
+function buildFlowMenuText(nodes: ChatbotFlowNode[], headerText?: string): string {
+  const sortedNodes = [...nodes].sort((a, b) => a.sort_order - b.sort_order);
+  
+  let menuText = headerText || "Escolha uma opção:\n\n";
+  
+  sortedNodes.forEach((node) => {
+    if (node.is_active) {
+      menuText += `*${node.option_number}* - ${node.title}\n`;
+    }
+  });
+  
+  menuText += "\n_Responda com o número da opção desejada._";
+  
+  return menuText;
+}
+
+// Helper: Find node by option number within current context
+function findNodeByOption(
+  nodes: ChatbotFlowNode[],
+  optionNumber: string,
+  parentNodeId: string | null
+): ChatbotFlowNode | null {
+  const cleanOption = optionNumber.trim();
+  
+  // Handle special commands
+  if (cleanOption === "0" || cleanOption.toLowerCase() === "voltar") {
+    return null; // Will trigger go back logic
+  }
+  
+  // Find matching node at current level
+  return nodes.find(
+    (n) => 
+      n.is_active && 
+      n.parent_node_id === parentNodeId && 
+      n.option_number === cleanOption
+  ) || null;
+}
+
+// Helper: Process flow response
+async function processFlowNode(
+  supabase: any,
+  globalConfig: GlobalConfig,
+  instanceName: string,
+  phone: string,
+  node: ChatbotFlowNode,
+  allNodes: ChatbotFlowNode[],
+  session: ChatbotFlowSession,
+  sellerId: string,
+  chatbotSettings: ChatbotSettings
+): Promise<{ sent: boolean; endSession: boolean; awaitHuman: boolean }> {
+  
+  // Send typing if enabled
+  if (chatbotSettings.typing_enabled) {
+    const typingDuration = getRandomDelay(
+      chatbotSettings.typing_duration_min,
+      chatbotSettings.typing_duration_max
+    );
+    await sendTypingStatus(globalConfig, instanceName, phone, typingDuration);
+  }
+
+  switch (node.response_type) {
+    case "text":
+    case "text_image": {
+      let sent = false;
+      if (node.response_type === "text_image" && node.response_content.image_url) {
+        sent = await sendImageMessage(
+          globalConfig,
+          instanceName,
+          phone,
+          node.response_content.text,
+          node.response_content.image_url
+        );
+      } else {
+        sent = await sendTextMessage(
+          globalConfig,
+          instanceName,
+          phone,
+          node.response_content.text,
+          supabase,
+          sellerId
+        );
+      }
+      return { sent, endSession: false, awaitHuman: false };
+    }
+
+    case "submenu": {
+      // Get child nodes and display submenu
+      const childNodes = allNodes.filter(
+        (n) => n.parent_node_id === node.id && n.is_active
+      );
+      
+      if (childNodes.length === 0) {
+        // No children, just send the text
+        const sent = await sendTextMessage(
+          globalConfig,
+          instanceName,
+          phone,
+          node.response_content.text,
+          supabase,
+          sellerId
+        );
+        return { sent, endSession: false, awaitHuman: false };
+      }
+
+      // Build submenu text
+      const menuText = buildFlowMenuText(childNodes, node.response_content.text + "\n\n");
+      const menuWithBack = menuText + "\n*0* - Voltar ao menu anterior";
+      
+      const sent = await sendTextMessage(
+        globalConfig,
+        instanceName,
+        phone,
+        menuWithBack,
+        supabase,
+        sellerId
+      );
+
+      // Update session to current node
+      await supabase
+        .from("chatbot_flow_sessions")
+        .update({
+          current_node_id: node.id,
+          last_interaction_at: new Date().toISOString(),
+        })
+        .eq("id", session.id);
+
+      return { sent, endSession: false, awaitHuman: false };
+    }
+
+    case "template": {
+      // Fetch template and send its content
+      if (node.template_id) {
+        const { data: template } = await supabase
+          .from("chatbot_templates")
+          .select("response_content, response_type")
+          .eq("id", node.template_id)
+          .maybeSingle();
+
+        if (template) {
+          const sent = await sendTextMessage(
+            globalConfig,
+            instanceName,
+            phone,
+            template.response_content?.text || node.response_content.text,
+            supabase,
+            sellerId
+          );
+          return { sent, endSession: false, awaitHuman: false };
+        }
+      }
+      
+      // Fallback to node text
+      const sent = await sendTextMessage(
+        globalConfig,
+        instanceName,
+        phone,
+        node.response_content.text,
+        supabase,
+        sellerId
+      );
+      return { sent, endSession: false, awaitHuman: false };
+    }
+
+    case "human_transfer": {
+      const sent = await sendTextMessage(
+        globalConfig,
+        instanceName,
+        phone,
+        node.response_content.text || "Aguarde, você será atendido por um de nossos atendentes.",
+        supabase,
+        sellerId
+      );
+
+      // Mark session as awaiting human
+      await supabase
+        .from("chatbot_flow_sessions")
+        .update({
+          awaiting_human: true,
+          last_interaction_at: new Date().toISOString(),
+        })
+        .eq("id", session.id);
+
+      return { sent, endSession: false, awaitHuman: true };
+    }
+
+    case "end_chat": {
+      const sent = await sendTextMessage(
+        globalConfig,
+        instanceName,
+        phone,
+        node.response_content.text || "Obrigado pelo contato! Até a próxima.",
+        supabase,
+        sellerId
+      );
+
+      // End session
+      await supabase
+        .from("chatbot_flow_sessions")
+        .update({
+          is_active: false,
+          last_interaction_at: new Date().toISOString(),
+        })
+        .eq("id", session.id);
+
+      return { sent, endSession: true, awaitHuman: false };
+    }
+
+    default:
+      return { sent: false, endSession: false, awaitHuman: false };
+  }
+}
 // Helper: Clean and normalize API URL (prevents /manager mistakes)
 function normalizeApiUrl(url: string): string {
   let cleanUrl = url.trim();
@@ -1201,6 +1466,225 @@ serve(async (req) => {
     
     const contactStatus = contact?.contact_status || "NEW";
     
+    // ===== CHECK FOR ACTIVE FLOW SESSION =====
+    const flowSession = await getFlowSession(supabase, sellerId, phone);
+    
+    if (flowSession && !flowSession.awaiting_human) {
+      console.log("Active flow session found for contact");
+      
+      // Get main menu flow if no current flow
+      let currentFlowId = flowSession.current_flow_id;
+      if (!currentFlowId) {
+        const { data: mainFlow } = await supabase
+          .from("chatbot_flows")
+          .select("id")
+          .eq("seller_id", sellerId)
+          .eq("is_active", true)
+          .eq("is_main_menu", true)
+          .maybeSingle();
+        
+        if (mainFlow) {
+          currentFlowId = mainFlow.id;
+        }
+      }
+
+      if (currentFlowId) {
+        // Get all nodes for this flow
+        const { data: flowNodes } = await supabase
+          .from("chatbot_flow_nodes")
+          .select("*")
+          .eq("flow_id", currentFlowId)
+          .eq("seller_id", sellerId)
+          .eq("is_active", true)
+          .order("sort_order");
+
+        if (flowNodes && flowNodes.length > 0) {
+          const cleanMessage = messageText.trim();
+          
+          // Check for "voltar" or "0" to go back
+          if (cleanMessage === "0" || cleanMessage.toLowerCase() === "voltar") {
+            // Go back to parent or main menu
+            if (flowSession.current_node_id) {
+              const currentNode = flowNodes.find(n => n.id === flowSession.current_node_id);
+              
+              if (currentNode?.parent_node_id) {
+                // Go to parent node's level
+                const parentNode = flowNodes.find(n => n.id === currentNode.parent_node_id);
+                const siblings = flowNodes.filter(n => n.parent_node_id === parentNode?.parent_node_id);
+                const menuText = buildFlowMenuText(siblings.length > 0 ? siblings : flowNodes.filter(n => !n.parent_node_id));
+                
+                await supabase
+                  .from("chatbot_flow_sessions")
+                  .update({
+                    current_node_id: parentNode?.parent_node_id || null,
+                    last_interaction_at: new Date().toISOString(),
+                  })
+                  .eq("id", flowSession.id);
+
+                const sent = await sendTextMessage(globalConfig, instanceName, phone, menuText, supabase, sellerId);
+                
+                return new Response(
+                  JSON.stringify({ status: sent ? "sent" : "failed", type: "flow_back" }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+              }
+            }
+            
+            // Go to main menu
+            const rootNodes = flowNodes.filter(n => !n.parent_node_id);
+            const menuText = buildFlowMenuText(rootNodes);
+            
+            await supabase
+              .from("chatbot_flow_sessions")
+              .update({
+                current_node_id: null,
+                last_interaction_at: new Date().toISOString(),
+              })
+              .eq("id", flowSession.id);
+
+            const sent = await sendTextMessage(globalConfig, instanceName, phone, menuText, supabase, sellerId);
+            
+            return new Response(
+              JSON.stringify({ status: sent ? "sent" : "failed", type: "flow_main_menu" }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+
+          // Find matching node for the option
+          const parentId = flowSession.current_node_id;
+          const matchedNode = findNodeByOption(flowNodes, cleanMessage, parentId);
+
+          if (matchedNode) {
+            const result = await processFlowNode(
+              supabase,
+              globalConfig,
+              instanceName,
+              phone,
+              matchedNode,
+              flowNodes,
+              flowSession,
+              sellerId,
+              chatbotSettings
+            );
+
+            // Log interaction
+            await supabase.from("chatbot_interactions").insert({
+              seller_id: sellerId,
+              contact_id: contact?.id,
+              phone,
+              incoming_message: messageText,
+              response_sent: matchedNode.response_content,
+              response_type: "flow_" + matchedNode.response_type,
+              was_blocked: false,
+            });
+
+            // Update contact interaction
+            await supabase
+              .from("chatbot_contacts")
+              .update({
+                last_interaction_at: new Date().toISOString(),
+                interaction_count: (contact?.interaction_count || 0) + 1,
+              })
+              .eq("id", contact?.id);
+
+            return new Response(
+              JSON.stringify({
+                status: result.sent ? "sent" : "failed",
+                type: "flow_node",
+                node: matchedNode.title,
+                endSession: result.endSession,
+                awaitHuman: result.awaitHuman,
+              }),
+              { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+        }
+      }
+    }
+
+    // ===== CHECK IF MESSAGE SHOULD START A NEW FLOW =====
+    // Check for keywords like "menu", "inicio", "opcoes" to start flow
+    const flowTriggers = ["menu", "inicio", "início", "opcoes", "opções", "ajuda", "help", "#"];
+    const shouldStartFlow = flowTriggers.some(t => messageText.toLowerCase().trim().includes(t));
+
+    if (shouldStartFlow) {
+      // Get main menu flow
+      const { data: mainFlow } = await supabase
+        .from("chatbot_flows")
+        .select("*")
+        .eq("seller_id", sellerId)
+        .eq("is_active", true)
+        .eq("is_main_menu", true)
+        .maybeSingle();
+
+      if (mainFlow) {
+        // Get root nodes
+        const { data: rootNodes } = await supabase
+          .from("chatbot_flow_nodes")
+          .select("*")
+          .eq("flow_id", mainFlow.id)
+          .eq("seller_id", sellerId)
+          .eq("is_active", true)
+          .is("parent_node_id", null)
+          .order("sort_order");
+
+        if (rootNodes && rootNodes.length > 0) {
+          // Create or update session
+          if (flowSession) {
+            await supabase
+              .from("chatbot_flow_sessions")
+              .update({
+                current_flow_id: mainFlow.id,
+                current_node_id: null,
+                is_active: true,
+                awaiting_human: false,
+                last_interaction_at: new Date().toISOString(),
+              })
+              .eq("id", flowSession.id);
+          } else {
+            await supabase
+              .from("chatbot_flow_sessions")
+              .insert({
+                seller_id: sellerId,
+                contact_phone: phone,
+                current_flow_id: mainFlow.id,
+                is_active: true,
+              });
+          }
+
+          // Send menu
+          const menuText = buildFlowMenuText(rootNodes as ChatbotFlowNode[], mainFlow.description ? mainFlow.description + "\n\n" : undefined);
+          
+          if (chatbotSettings.typing_enabled) {
+            const typingDuration = getRandomDelay(
+              chatbotSettings.typing_duration_min,
+              chatbotSettings.typing_duration_max
+            );
+            await sendTypingStatus(globalConfig, instanceName, phone, typingDuration);
+          }
+          
+          const sent = await sendTextMessage(globalConfig, instanceName, phone, menuText, supabase, sellerId);
+
+          // Log interaction
+          await supabase.from("chatbot_interactions").insert({
+            seller_id: sellerId,
+            contact_id: contact?.id,
+            phone,
+            incoming_message: messageText,
+            response_sent: { text: menuText },
+            response_type: "flow_menu",
+            was_blocked: false,
+          });
+
+          return new Response(
+            JSON.stringify({ status: sent ? "sent" : "failed", type: "flow_start" }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+    }
+
+    // ===== FALLBACK TO REGULAR RULES =====
     // Get active rules for this seller
     const { data: rules } = await supabase
       .from("chatbot_rules")
@@ -1456,4 +1940,3 @@ serve(async (req) => {
     );
   }
 });
-;
