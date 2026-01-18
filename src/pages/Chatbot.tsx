@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -13,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Bot, Plus, Settings, MessageSquare, Users, History, Pencil, Trash2, Copy, Zap, Clock, Filter, Image, List, LayoutGrid, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Bot, Plus, Settings, MessageSquare, Users, History, Pencil, Trash2, Copy, Zap, Image, List, LayoutGrid, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useChatbotRules, ChatbotRule, ChatbotTemplate } from '@/hooks/useChatbotRules';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -41,7 +40,7 @@ const RESPONSE_TYPES = {
 };
 
 export default function Chatbot() {
-  const { user, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
   const {
     rules,
     templates,
@@ -223,114 +222,109 @@ export default function Chatbot() {
 
   if (isLoading) {
     return (
-      <AppLayout>
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        </div>
-      </AppLayout>
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
     );
   }
 
   return (
-    <AppLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Bot className="h-6 w-6" />
-              Chatbot Automático
-            </h1>
-            <p className="text-muted-foreground">
-              Configure respostas automáticas para WhatsApp
-            </p>
-          </div>
-          
-          <div className="flex items-center gap-4">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Bot className="h-6 w-6" />
+            Chatbot Automático
+          </h1>
+          <p className="text-muted-foreground">
+            Configure respostas automáticas para WhatsApp
+          </p>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={settingsForm.is_enabled}
+            onCheckedChange={(checked) => {
+              setSettingsForm(prev => ({ ...prev, is_enabled: checked }));
+              saveSettings({ is_enabled: checked });
+            }}
+          />
+          <Label>{settingsForm.is_enabled ? 'Ativo' : 'Inativo'}</Label>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-4">
             <div className="flex items-center gap-2">
-              <Switch
-                checked={settingsForm.is_enabled}
-                onCheckedChange={(checked) => {
-                  setSettingsForm(prev => ({ ...prev, is_enabled: checked }));
-                  saveSettings({ is_enabled: checked });
-                }}
-              />
-              <Label>{settingsForm.is_enabled ? 'Ativo' : 'Inativo'}</Label>
+              <MessageSquare className="h-4 w-4 text-primary" />
+              <span className="text-sm text-muted-foreground">Regras Ativas</span>
             </div>
-          </div>
-        </div>
+            <p className="text-2xl font-bold">{rules.filter(r => r.is_active).length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" />
+              <span className="text-sm text-muted-foreground">Contatos</span>
+            </div>
+            <p className="text-2xl font-bold">{contacts.length}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-primary" />
+              <span className="text-sm text-muted-foreground">Interações (24h)</span>
+            </div>
+            <p className="text-2xl font-bold">
+              {interactions.filter(i => {
+                const date = new Date(i.sent_at);
+                const now = new Date();
+                return (now.getTime() - date.getTime()) < 24 * 60 * 60 * 1000;
+              }).length}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2">
+              <Zap className="h-4 w-4 text-primary" />
+              <span className="text-sm text-muted-foreground">Respostas Enviadas</span>
+            </div>
+            <p className="text-2xl font-bold">
+              {interactions.filter(i => !i.was_blocked).length}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-primary" />
-                <span className="text-sm text-muted-foreground">Regras Ativas</span>
-              </div>
-              <p className="text-2xl font-bold">{rules.filter(r => r.is_active).length}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-primary" />
-                <span className="text-sm text-muted-foreground">Contatos</span>
-              </div>
-              <p className="text-2xl font-bold">{contacts.length}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex items-center gap-2">
-                <History className="h-4 w-4 text-primary" />
-                <span className="text-sm text-muted-foreground">Interações (24h)</span>
-              </div>
-              <p className="text-2xl font-bold">
-                {interactions.filter(i => {
-                  const date = new Date(i.sent_at);
-                  const now = new Date();
-                  return (now.getTime() - date.getTime()) < 24 * 60 * 60 * 1000;
-                }).length}
-              </p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex items-center gap-2">
-                <Zap className="h-4 w-4 text-primary" />
-                <span className="text-sm text-muted-foreground">Respostas Enviadas</span>
-              </div>
-              <p className="text-2xl font-bold">
-                {interactions.filter(i => !i.was_blocked).length}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+      {/* Main Content */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-flex">
+          <TabsTrigger value="rules" className="flex items-center gap-2">
+            <MessageSquare className="h-4 w-4" />
+            <span className="hidden sm:inline">Regras</span>
+          </TabsTrigger>
+          <TabsTrigger value="templates" className="flex items-center gap-2">
+            <Copy className="h-4 w-4" />
+            <span className="hidden sm:inline">Templates</span>
+          </TabsTrigger>
+          <TabsTrigger value="contacts" className="flex items-center gap-2">
+            <Users className="h-4 w-4" />
+            <span className="hidden sm:inline">Contatos</span>
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="flex items-center gap-2">
+            <Settings className="h-4 w-4" />
+            <span className="hidden sm:inline">Configurações</span>
+          </TabsTrigger>
+        </TabsList>
 
-        {/* Main Content */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-flex">
-            <TabsTrigger value="rules" className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4" />
-              <span className="hidden sm:inline">Regras</span>
-            </TabsTrigger>
-            <TabsTrigger value="templates" className="flex items-center gap-2">
-              <Copy className="h-4 w-4" />
-              <span className="hidden sm:inline">Templates</span>
-            </TabsTrigger>
-            <TabsTrigger value="contacts" className="flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              <span className="hidden sm:inline">Contatos</span>
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="flex items-center gap-2">
-              <Settings className="h-4 w-4" />
-              <span className="hidden sm:inline">Configurações</span>
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Rules Tab */}
-          <TabsContent value="rules" className="space-y-4">
+        {/* Rules Tab */}
+        <TabsContent value="rules" className="space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="text-lg font-semibold">Minhas Regras</h2>
               <Button onClick={() => { resetForm(); setShowRuleDialog(true); }}>
@@ -639,9 +633,8 @@ export default function Chatbot() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Rule Dialog */}
       <Dialog open={showRuleDialog} onOpenChange={setShowRuleDialog}>
@@ -955,6 +948,6 @@ export default function Chatbot() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </AppLayout>
+    </div>
   );
 }
