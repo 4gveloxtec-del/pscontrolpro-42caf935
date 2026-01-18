@@ -343,6 +343,38 @@ export function SendMessageDialog({ client, open, onOpenChange, onMessageSent }:
     enabled: !!user?.id,
   });
 
+  // Fetch external apps linked to this client
+  const { data: clientExternalApps = [] } = useQuery({
+    queryKey: ['client-external-apps-dialog', client.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('client_external_apps')
+        .select(`
+          id,
+          external_app_id,
+          external_apps:external_app_id (
+            id,
+            name,
+            download_url,
+            website_url
+          )
+        `)
+        .eq('client_id', client.id);
+      if (error) throw error;
+      return data as Array<{
+        id: string;
+        external_app_id: string;
+        external_apps: {
+          id: string;
+          name: string;
+          download_url: string | null;
+          website_url: string | null;
+        } | null;
+      }>;
+    },
+    enabled: !!client.id && open,
+  });
+
   // Check if WhatsApp API is available
   const { data: sellerInstance } = useQuery({
     queryKey: ['whatsapp-seller-instance-dialog', user?.id],
@@ -556,6 +588,31 @@ export function SendMessageDialog({ client, open, onOpenChange, onMessageSent }:
     const clientServer = client.server_id ? servers.find(s => s.id === client.server_id) : null;
     const panelUrl = clientServer?.panel_url || '';
 
+    // Get external apps info (name and download link)
+    const externalAppsInfo = clientExternalApps
+      .filter(app => app.external_apps)
+      .map(app => ({
+        name: app.external_apps!.name,
+        download_url: app.external_apps!.download_url || '',
+        website_url: app.external_apps!.website_url || '',
+      }));
+
+    // Get first app name and download link (for simple templates)
+    const firstAppName = externalAppsInfo[0]?.name || '';
+    const firstAppDownloadUrl = externalAppsInfo[0]?.download_url || '';
+    
+    // Generate formatted list of all external apps with download links
+    const appsExternosText = externalAppsInfo
+      .filter(app => app.name)
+      .map(app => {
+        let appText = `📱 *${app.name}*`;
+        if (app.download_url) {
+          appText += `\n🔗 Download: ${app.download_url}`;
+        }
+        return appText;
+      })
+      .join('\n\n');
+
     return text
       .replace(/{nome}/gi, client.name)
       .replace(/{login}/gi, login)
@@ -576,7 +633,10 @@ export function SendMessageDialog({ client, open, onOpenChange, onMessageSent }:
       .replace(/{pix}/gi, sellerProfile?.pix_key || '[PIX não configurado]')
       .replace(/{empresa}/gi, sellerProfile?.company_name || sellerProfile?.full_name || '')
       .replace(/{telegram}/gi, client.telegram || '')
-      .replace(/{app}/gi, 'App');
+      .replace(/{app}/gi, firstAppName || 'App')
+      .replace(/{nome_app}/gi, firstAppName)
+      .replace(/{link_download_app}/gi, firstAppDownloadUrl)
+      .replace(/{apps_externos}/gi, appsExternosText);
   };
 
   const handleTemplateChange = (templateId: string) => {
