@@ -6,9 +6,18 @@ const corsHeaders = {
 };
 
 // AES-256-GCM encryption/decryption
-const ENCRYPTION_KEY = Deno.env.get('ENCRYPTION_KEY') || 'default-32-char-key-for-aes256!';
+// SECURITY: Require encryption key from environment - no insecure fallback
+const ENCRYPTION_KEY = Deno.env.get('ENCRYPTION_KEY');
+
+if (!ENCRYPTION_KEY) {
+  console.error('CRITICAL: ENCRYPTION_KEY environment variable not set');
+}
 
 async function getKey(): Promise<CryptoKey> {
+  if (!ENCRYPTION_KEY) {
+    throw new Error('Encryption key not configured');
+  }
+  
   const encoder = new TextEncoder();
   const keyData = encoder.encode(ENCRYPTION_KEY.padEnd(32, '0').slice(0, 32));
   
@@ -22,6 +31,10 @@ async function getKey(): Promise<CryptoKey> {
 }
 
 async function encrypt(plaintext: string): Promise<string> {
+  if (!ENCRYPTION_KEY) {
+    throw new Error('Encryption key not configured');
+  }
+  
   const key = await getKey();
   const encoder = new TextEncoder();
   const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -42,12 +55,15 @@ async function encrypt(plaintext: string): Promise<string> {
 
 async function decrypt(ciphertext: string): Promise<string> {
   try {
+    if (!ENCRYPTION_KEY) {
+      throw new Error('Encryption key not configured');
+    }
+    
     // Check if the data looks like base64-encoded encrypted data
     // Valid AES-GCM encrypted data should be at least 12 bytes (IV) + some encrypted content
     const base64Regex = /^[A-Za-z0-9+/]+=*$/;
     if (!base64Regex.test(ciphertext) || ciphertext.length < 20) {
       // Data doesn't look encrypted, return as-is
-      console.log('Data does not appear to be encrypted, returning original');
       return ciphertext;
     }
     
@@ -56,7 +72,6 @@ async function decrypt(ciphertext: string): Promise<string> {
     
     // Validate minimum length (12 bytes IV + at least some encrypted data)
     if (combined.length < 13) {
-      console.log('Data too short to be encrypted, returning original');
       return ciphertext;
     }
     
@@ -70,9 +85,8 @@ async function decrypt(ciphertext: string): Promise<string> {
     );
     
     return new TextDecoder().decode(decrypted);
-  } catch (error) {
+  } catch {
     // If decryption fails, the data might not be encrypted - return original
-    console.log('Decryption failed, returning original data:', error);
     return ciphertext;
   }
 }
