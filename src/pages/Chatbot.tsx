@@ -12,8 +12,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Bot, Plus, Settings, MessageSquare, Users, History, Pencil, Trash2, Copy, Zap, Image, List, LayoutGrid, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Bot, Plus, Settings, MessageSquare, Users, History, Pencil, Trash2, Copy, Zap, Image, List, LayoutGrid, Loader2, AlertCircle, CheckCircle2, Folder, GitBranch } from 'lucide-react';
 import { useChatbotRules, ChatbotRule, ChatbotTemplate } from '@/hooks/useChatbotRules';
+import { useChatbotCategories } from '@/hooks/useChatbotCategories';
+import { ChatbotCategories } from '@/components/ChatbotCategories';
+import { ChatbotFlowManager } from '@/components/ChatbotFlowManager';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -323,7 +326,7 @@ export default function Chatbot() {
 
       {/* Main Content */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-flex">
+        <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-flex">
           <TabsTrigger value="rules" className="flex items-center gap-2">
             <MessageSquare className="h-4 w-4" />
             <span className="hidden sm:inline">Regras</span>
@@ -332,13 +335,21 @@ export default function Chatbot() {
             <Copy className="h-4 w-4" />
             <span className="hidden sm:inline">Templates</span>
           </TabsTrigger>
+          <TabsTrigger value="categories" className="flex items-center gap-2">
+            <Folder className="h-4 w-4" />
+            <span className="hidden sm:inline">Categorias</span>
+          </TabsTrigger>
+          <TabsTrigger value="flows" className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4" />
+            <span className="hidden sm:inline">Fluxos</span>
+          </TabsTrigger>
           <TabsTrigger value="contacts" className="flex items-center gap-2">
             <Users className="h-4 w-4" />
             <span className="hidden sm:inline">Contatos</span>
           </TabsTrigger>
           <TabsTrigger value="settings" className="flex items-center gap-2">
             <Settings className="h-4 w-4" />
-            <span className="hidden sm:inline">Configurações</span>
+            <span className="hidden sm:inline">Config</span>
           </TabsTrigger>
         </TabsList>
 

@@ -43,6 +43,8 @@ export interface ChatbotTemplate {
   cooldown_hours: number;
   is_active: boolean;
   created_by: string;
+  seller_id?: string; // NULL for admin templates, seller_id for seller templates
+  category?: string;
   created_at: string;
 }
 
@@ -116,10 +118,13 @@ export function useChatbotRules() {
   }, [user]);
 
   const fetchTemplates = useCallback(async () => {
+    if (!user) return;
+    
+    // Fetch both admin templates (seller_id IS NULL) and seller's own templates
     const { data, error } = await supabase
       .from('chatbot_templates')
       .select('*')
-      .eq('is_active', true)
+      .or(`seller_id.is.null,seller_id.eq.${user.id}`)
       .order('name');
     
     if (error) {
@@ -128,7 +133,7 @@ export function useChatbotRules() {
     }
     
     setTemplates((data || []) as unknown as ChatbotTemplate[]);
-  }, []);
+  }, [user]);
 
   const fetchSettings = useCallback(async () => {
     if (!user) return;
@@ -306,9 +311,9 @@ export function useChatbotRules() {
     return { success: true };
   };
 
-  // Template operations (admin only)
+  // Template operations - sellers can create their own, admins create global templates
   const createTemplate = async (template: Omit<ChatbotTemplate, 'id' | 'created_by' | 'created_at'>) => {
-    if (!user || !isAdmin) return { error: 'Not authorized' };
+    if (!user) return { error: 'Not authorized' };
     
     const { data, error } = await supabase
       .from('chatbot_templates')
@@ -323,6 +328,8 @@ export function useChatbotRules() {
         cooldown_hours: template.cooldown_hours,
         is_active: template.is_active,
         created_by: user.id,
+        seller_id: isAdmin ? null : user.id, // Admin creates global templates, sellers create their own
+        category: template.category,
       })
       .select()
       .single();
@@ -338,7 +345,18 @@ export function useChatbotRules() {
   };
 
   const updateTemplate = async (id: string, updates: Partial<ChatbotTemplate>) => {
-    if (!isAdmin) return { error: 'Not authorized' };
+    if (!user) return { error: 'Not authorized' };
+    
+    // Check if user can update this template
+    const template = templates.find(t => t.id === id);
+    if (!template) return { error: 'Template not found' };
+    
+    // Sellers can only update their own templates, admins can update global templates
+    const canUpdate = isAdmin 
+      ? template.seller_id === null || template.seller_id === user.id
+      : template.seller_id === user.id;
+    
+    if (!canUpdate) return { error: 'Not authorized to update this template' };
     
     const { error } = await supabase
       .from('chatbot_templates')
@@ -352,6 +370,7 @@ export function useChatbotRules() {
         cooldown_mode: updates.cooldown_mode,
         cooldown_hours: updates.cooldown_hours,
         is_active: updates.is_active,
+        category: updates.category,
       })
       .eq('id', id);
     
@@ -366,7 +385,18 @@ export function useChatbotRules() {
   };
 
   const deleteTemplate = async (id: string) => {
-    if (!isAdmin) return { error: 'Not authorized' };
+    if (!user) return { error: 'Not authorized' };
+    
+    // Check if user can delete this template
+    const template = templates.find(t => t.id === id);
+    if (!template) return { error: 'Template not found' };
+    
+    // Sellers can only delete their own templates, admins can delete global templates
+    const canDelete = isAdmin 
+      ? template.seller_id === null || template.seller_id === user.id
+      : template.seller_id === user.id;
+    
+    if (!canDelete) return { error: 'Not authorized to delete this template' };
     
     const { error } = await supabase
       .from('chatbot_templates')

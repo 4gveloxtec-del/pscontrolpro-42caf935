@@ -148,6 +148,166 @@ export type Database = {
           },
         ]
       }
+      chatbot_flow_nodes: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          flow_id: string
+          id: string
+          is_active: boolean | null
+          option_number: string
+          parent_node_id: string | null
+          response_content: Json | null
+          response_type: string | null
+          seller_id: string
+          sort_order: number | null
+          template_id: string | null
+          title: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          flow_id: string
+          id?: string
+          is_active?: boolean | null
+          option_number: string
+          parent_node_id?: string | null
+          response_content?: Json | null
+          response_type?: string | null
+          seller_id: string
+          sort_order?: number | null
+          template_id?: string | null
+          title: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          flow_id?: string
+          id?: string
+          is_active?: boolean | null
+          option_number?: string
+          parent_node_id?: string | null
+          response_content?: Json | null
+          response_type?: string | null
+          seller_id?: string
+          sort_order?: number | null
+          template_id?: string | null
+          title?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_flow_nodes_flow_id_fkey"
+            columns: ["flow_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_nodes_parent_node_id_fkey"
+            columns: ["parent_node_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flow_nodes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_nodes_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_flow_sessions: {
+        Row: {
+          awaiting_human: boolean | null
+          contact_phone: string
+          created_at: string | null
+          current_flow_id: string | null
+          current_node_id: string | null
+          id: string
+          is_active: boolean | null
+          last_interaction_at: string | null
+          seller_id: string
+          session_started_at: string | null
+        }
+        Insert: {
+          awaiting_human?: boolean | null
+          contact_phone: string
+          created_at?: string | null
+          current_flow_id?: string | null
+          current_node_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_interaction_at?: string | null
+          seller_id: string
+          session_started_at?: string | null
+        }
+        Update: {
+          awaiting_human?: boolean | null
+          contact_phone?: string
+          created_at?: string | null
+          current_flow_id?: string | null
+          current_node_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_interaction_at?: string | null
+          seller_id?: string
+          session_started_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_flow_sessions_current_flow_id_fkey"
+            columns: ["current_flow_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_flow_sessions_current_node_id_fkey"
+            columns: ["current_node_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_flow_nodes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_flows: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          is_main_menu: boolean | null
+          name: string
+          seller_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_main_menu?: boolean | null
+          name: string
+          seller_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_main_menu?: boolean | null
+          name?: string
+          seller_id?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       chatbot_interactions: {
         Row: {
           block_reason: string | null
@@ -355,8 +515,48 @@ export type Database = {
         }
         Relationships: []
       }
+      chatbot_template_categories: {
+        Row: {
+          color: string | null
+          created_at: string | null
+          description: string | null
+          icon: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          seller_id: string
+          sort_order: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string | null
+          description?: string | null
+          icon?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          seller_id: string
+          sort_order?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          color?: string | null
+          created_at?: string | null
+          description?: string | null
+          icon?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          seller_id?: string
+          sort_order?: number | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       chatbot_templates: {
         Row: {
+          category: string | null
           contact_filter: string | null
           cooldown_hours: number | null
           cooldown_mode: string | null
@@ -368,10 +568,12 @@ export type Database = {
           name: string
           response_content: Json
           response_type: string | null
+          seller_id: string | null
           trigger_text: string
           updated_at: string | null
         }
         Insert: {
+          category?: string | null
           contact_filter?: string | null
           cooldown_hours?: number | null
           cooldown_mode?: string | null
@@ -383,10 +585,12 @@ export type Database = {
           name: string
           response_content?: Json
           response_type?: string | null
+          seller_id?: string | null
           trigger_text: string
           updated_at?: string | null
         }
         Update: {
+          category?: string | null
           contact_filter?: string | null
           cooldown_hours?: number | null
           cooldown_mode?: string | null
@@ -398,6 +602,7 @@ export type Database = {
           name?: string
           response_content?: Json
           response_type?: string | null
+          seller_id?: string | null
           trigger_text?: string
           updated_at?: string | null
         }
@@ -1735,6 +1940,10 @@ export type Database = {
       cleanup_old_login_attempts: { Args: never; Returns: undefined }
       create_admin_templates: {
         Args: { admin_uuid: string }
+        Returns: undefined
+      }
+      create_default_chatbot_categories: {
+        Args: { p_seller_id: string }
         Returns: undefined
       }
       create_default_plans_for_seller: {
