@@ -12,6 +12,16 @@ interface EvolutionConfig {
   instance_name: string;
 }
 
+// Clean and normalize API URL
+function normalizeApiUrl(url: string): string {
+  let cleanUrl = url.trim();
+  // Remove /manager or /manager/ from the end if present (common mistake)
+  cleanUrl = cleanUrl.replace(/\/manager\/?$/i, '');
+  // Remove trailing slashes
+  cleanUrl = cleanUrl.replace(/\/+$/, '');
+  return cleanUrl;
+}
+
 // Send message via Evolution API
 async function sendEvolutionMessage(
   config: EvolutionConfig,
@@ -29,9 +39,11 @@ async function sendEvolutionMessage(
       }
     }
 
-    const url = `${config.api_url}/message/sendText/${config.instance_name}`;
+    const baseUrl = normalizeApiUrl(config.api_url);
+    const url = `${baseUrl}/message/sendText/${config.instance_name}`;
     
     console.log(`Sending message to ${formattedPhone} via Evolution API`);
+    console.log(`URL: ${url}`);
     
     const response = await fetch(url, {
       method: 'POST',
@@ -64,7 +76,10 @@ async function sendEvolutionMessage(
 // Check Evolution API connection status
 async function checkEvolutionConnection(config: EvolutionConfig): Promise<boolean> {
   try {
-    const url = `${config.api_url}/instance/connectionState/${config.instance_name}`;
+    const baseUrl = normalizeApiUrl(config.api_url);
+    const url = `${baseUrl}/instance/connectionState/${config.instance_name}`;
+    
+    console.log(`Checking connection at: ${url}`);
     
     const response = await fetch(url, {
       method: 'GET',
@@ -73,11 +88,20 @@ async function checkEvolutionConnection(config: EvolutionConfig): Promise<boolea
       },
     });
 
+    // Check if response is HTML (error page)
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      console.error('API returned HTML instead of JSON. URL may be incorrect:', url);
+      return false;
+    }
+
     if (!response.ok) {
+      console.log(`Connection check failed with status ${response.status}`);
       return false;
     }
 
     const result = await response.json();
+    console.log('Connection state result:', JSON.stringify(result));
     return result?.instance?.state === 'open' || result?.state === 'open';
   } catch (error) {
     console.error('Error checking Evolution connection:', error);
@@ -88,6 +112,8 @@ async function checkEvolutionConnection(config: EvolutionConfig): Promise<boolea
 // Get QR Code for connection
 async function getEvolutionQrCode(config: EvolutionConfig): Promise<{ qrcode?: string; connected?: boolean; error?: string }> {
   try {
+    const baseUrl = normalizeApiUrl(config.api_url);
+    
     // First check if already connected
     const isConnected = await checkEvolutionConnection(config);
     if (isConnected) {
@@ -95,7 +121,8 @@ async function getEvolutionQrCode(config: EvolutionConfig): Promise<{ qrcode?: s
     }
 
     // Try to get QR code
-    const url = `${config.api_url}/instance/connect/${config.instance_name}`;
+    const url = `${baseUrl}/instance/connect/${config.instance_name}`;
+    console.log(`Getting QR code from: ${url}`);
     
     const response = await fetch(url, {
       method: 'GET',
@@ -104,9 +131,21 @@ async function getEvolutionQrCode(config: EvolutionConfig): Promise<{ qrcode?: s
       },
     });
 
+    // Check if response is HTML (error page)
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('text/html')) {
+      const htmlPreview = await response.text();
+      console.error('API returned HTML instead of JSON:', htmlPreview.substring(0, 200));
+      return { error: 'URL da API incorreta. Verifique se a URL aponta para a API (não o painel manager).' };
+    }
+
     if (!response.ok) {
+      console.log(`QR code request failed with status ${response.status}, trying to create instance...`);
+      
       // If instance doesn't exist, try to create it first
-      const createUrl = `${config.api_url}/instance/create`;
+      const createUrl = `${baseUrl}/instance/create`;
+      console.log(`Creating instance at: ${createUrl}`);
+      
       const createResponse = await fetch(createUrl, {
         method: 'POST',
         headers: {
@@ -119,23 +158,39 @@ async function getEvolutionQrCode(config: EvolutionConfig): Promise<{ qrcode?: s
         }),
       });
 
+      // Check for HTML response
+      const createContentType = createResponse.headers.get('content-type') || '';
+      if (createContentType.includes('text/html')) {
+        return { error: 'URL da API incorreta. Configure a URL base da API Evolution (ex: https://api.exemplo.com).' };
+      }
+
       if (createResponse.ok) {
         const createResult = await createResponse.json();
+        console.log('Instance created:', JSON.stringify(createResult));
         if (createResult.qrcode?.base64) {
           return { qrcode: createResult.qrcode.base64 };
         }
+        if (createResult.base64) {
+          return { qrcode: createResult.base64 };
+        }
       }
 
-      return { error: 'Failed to get QR code' };
+      return { error: 'Falha ao obter QR code. Verifique a URL e token da API.' };
     }
 
     const result = await response.json();
+    console.log('QR code result:', JSON.stringify(result));
     
     if (result.base64 || result.qrcode?.base64) {
       return { qrcode: result.base64 || result.qrcode.base64 };
     }
 
-    return { error: 'No QR code available' };
+    // Some versions return pairingCode instead
+    if (result.pairingCode) {
+      return { qrcode: result.pairingCode };
+    }
+
+    return { error: 'QR code não disponível. A instância pode já estar conectada.' };
   } catch (error) {
     console.error('Error getting QR code:', error);
     return { error: (error as Error).message };
