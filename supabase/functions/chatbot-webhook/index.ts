@@ -238,6 +238,27 @@ function findMatchingRule(
   return null;
 }
 
+// Helper: Clean and normalize API URL (prevents /manager mistakes)
+function normalizeApiUrl(url: string): string {
+  let cleanUrl = url.trim();
+  cleanUrl = cleanUrl.replace(/\/manager\/?$/i, "");
+  cleanUrl = cleanUrl.replace(/\/+$/, "");
+  return cleanUrl;
+}
+
+function formatPhone(phone: string): string {
+  let formatted = (phone || "").replace(/\D/g, "");
+
+  if (formatted.startsWith("55")) return formatted;
+
+  // Brazilian local numbers (DDD + number)
+  if (formatted.length === 10 || formatted.length === 11) {
+    return `55${formatted}`;
+  }
+
+  return formatted;
+}
+
 // Send text message via Evolution API
 async function sendTextMessage(
   globalConfig: GlobalConfig,
@@ -246,8 +267,10 @@ async function sendTextMessage(
   text: string
 ): Promise<boolean> {
   try {
-    const url = `${globalConfig.api_url}/message/sendText/${instanceName}`;
-    
+    const baseUrl = normalizeApiUrl(globalConfig.api_url);
+    const formattedPhone = formatPhone(phone);
+    const url = `${baseUrl}/message/sendText/${instanceName}`;
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -255,12 +278,12 @@ async function sendTextMessage(
         apikey: globalConfig.api_token,
       },
       body: JSON.stringify({
-        number: phone,
+        number: formattedPhone,
         text,
       }),
     });
-    
-    console.log(`Text message sent to ${phone}: ${response.ok}`);
+
+    console.log(`Text message sent to ${formattedPhone}: ${response.ok}`);
     return response.ok;
   } catch (error) {
     console.error("Error sending text:", error);
@@ -277,8 +300,10 @@ async function sendImageMessage(
   imageUrl: string
 ): Promise<boolean> {
   try {
-    const url = `${globalConfig.api_url}/message/sendMedia/${instanceName}`;
-    
+    const baseUrl = normalizeApiUrl(globalConfig.api_url);
+    const formattedPhone = formatPhone(phone);
+    const url = `${baseUrl}/message/sendMedia/${instanceName}`;
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
@@ -286,14 +311,14 @@ async function sendImageMessage(
         apikey: globalConfig.api_token,
       },
       body: JSON.stringify({
-        number: phone,
+        number: formattedPhone,
         mediatype: "image",
         media: imageUrl,
         caption: text,
       }),
     });
-    
-    console.log(`Image message sent to ${phone}: ${response.ok}`);
+
+    console.log(`Image message sent to ${formattedPhone}: ${response.ok}`);
     return response.ok;
   } catch (error) {
     console.error("Error sending image:", error);
@@ -312,13 +337,8 @@ async function sendButtonsMessage(
   try {
     // Evolution API v2 uses sendTemplate or sendButtons with different format
     // Try the v2 format first
-    const baseUrl = globalConfig.api_url.replace(/\/+$/, '');
-    
-    // Format phone
-    let formattedPhone = phone.replace(/\D/g, '');
-    if (!formattedPhone.startsWith('55') && (formattedPhone.length === 10 || formattedPhone.length === 11)) {
-      formattedPhone = '55' + formattedPhone;
-    }
+    const baseUrl = normalizeApiUrl(globalConfig.api_url);
+    const formattedPhone = formatPhone(phone);
     
     // Try native buttons first (some versions support it)
     const buttonsUrl = `${baseUrl}/message/sendButtons/${instanceName}`;
@@ -421,13 +441,8 @@ async function sendListMessage(
   }>
 ): Promise<boolean> {
   try {
-    const baseUrl = globalConfig.api_url.replace(/\/+$/, '');
-    
-    // Format phone
-    let formattedPhone = phone.replace(/\D/g, '');
-    if (!formattedPhone.startsWith('55') && (formattedPhone.length === 10 || formattedPhone.length === 11)) {
-      formattedPhone = '55' + formattedPhone;
-    }
+    const baseUrl = normalizeApiUrl(globalConfig.api_url);
+    const formattedPhone = formatPhone(phone);
     
     // Try native list endpoint first
     const listUrl = `${baseUrl}/message/sendList/${instanceName}`;
