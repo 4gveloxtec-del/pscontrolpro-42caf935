@@ -33,29 +33,51 @@ type RawWebhookPayload = Record<string, unknown>;
 
 function normalizeWebhookPayload(raw: RawWebhookPayload): WebhookPayload {
   // Evolution / Baileys payloads can vary a lot depending on version/config.
-  const event =
-    (raw?.event as string | undefined) ??
-    (raw?.type as string | undefined) ??
-    ((raw?.data as any)?.event as string | undefined) ??
-    ((raw?.data as any)?.type as string | undefined) ??
+  const eventCandidate =
+    (raw?.event as unknown) ??
+    (raw?.type as unknown) ??
+    ((raw as any)?.data?.event as unknown) ??
+    ((raw as any)?.data?.type as unknown) ??
     "";
 
-  const instance =
-    (raw?.instance as string | undefined) ??
-    (raw?.instanceName as string | undefined) ??
-    ((raw?.data as any)?.instance as string | undefined) ??
-    ((raw?.data as any)?.instanceName as string | undefined) ??
+  const rawInstanceCandidate: unknown =
+    (raw as any)?.instance ??
+    (raw as any)?.instanceName ??
+    (raw as any)?.data?.instance ??
+    (raw as any)?.data?.instanceName ??
+    (raw as any)?.data?.instance?.instanceName ??
+    (raw as any)?.data?.instance?.name ??
+    (raw as any)?.instance?.instanceName ??
+    (raw as any)?.instance?.name ??
     "";
+
+  const event = typeof eventCandidate === "string" ? eventCandidate : String(eventCandidate || "");
+
+  let instance = "";
+  if (typeof rawInstanceCandidate === "string") {
+    instance = rawInstanceCandidate;
+  } else if (rawInstanceCandidate && typeof rawInstanceCandidate === "object") {
+    instance =
+      String((rawInstanceCandidate as any)?.instanceName || "") ||
+      String((rawInstanceCandidate as any)?.name || "") ||
+      String((rawInstanceCandidate as any)?.instance || "") ||
+      "";
+  } else {
+    instance = String(rawInstanceCandidate || "");
+  }
 
   // Try to locate the actual message object
   let data: IncomingMessage | undefined = undefined;
   const candidates: unknown[] = [
-    raw?.data,
+    (raw as any)?.data,
     (raw as any)?.message,
     (raw as any)?.messages?.[0],
     (raw as any)?.data?.data,
     (raw as any)?.data?.message,
     (raw as any)?.data?.messages?.[0],
+    (raw as any)?.data?.messages?.[0]?.message,
+    (raw as any)?.data?.payload,
+    (raw as any)?.payload,
   ].filter(Boolean);
 
   for (const c of candidates) {
@@ -302,6 +324,22 @@ function formatPhone(phone: string): string {
   }
 
   return formatted;
+}
+
+async function auditWebhook(
+  supabase: any,
+  payload: Record<string, unknown>
+): Promise<void> {
+  try {
+    await supabase.from("security_audit_log").insert({
+      action: "chatbot_webhook",
+      table_name: "chatbot_webhook",
+      record_id: (payload.instanceName as string | undefined) ?? null,
+      new_data: payload,
+    });
+  } catch (e) {
+    console.log("auditWebhook failed", e);
+  }
 }
 
 // Send text message via Evolution API
@@ -632,7 +670,14 @@ serve(async (req) => {
     );
 
     // Only process incoming messages (but some providers omit `event`)
-    if (payload.event && payload.event !== "messages.upsert") {
+    const eventLower = (payload.event || "").toLowerCase().trim();
+    if (eventLower && eventLower !== "messages.upsert") {
+      await auditWebhook(supabase, {
+        status: "ignored",
+        reason: "Not a message event",
+        event: payload.event,
+        instanceName: payload.instance,
+      });
       return new Response(JSON.stringify({ status: "ignored", reason: "Not a message event" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -640,6 +685,12 @@ serve(async (req) => {
 
     const message = payload.data;
     if (!message?.key?.remoteJid) {
+      await auditWebhook(supabase, {
+        status: "ignored",
+        reason: "No message data",
+        event: payload.event,
+        instanceName: payload.instance,
+      });
       return new Response(JSON.stringify({ status: "ignored", reason: "No message data" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -647,6 +698,11 @@ serve(async (req) => {
 
     const instanceName = (payload.instance || "").trim();
     if (!instanceName) {
+      await auditWebhook(supabase, {
+        status: "ignored",
+        reason: "No instance name",
+        event: payload.event,
+      });
       return new Response(JSON.stringify({ status: "ignored", reason: "No instance name" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -665,6 +721,13 @@ serve(async (req) => {
     
     if (!globalConfigData) {
       console.log("Global config not active");
+      await auditWebhook(supabase, {
+        status: "ignored",
+        reason: "API not active",
+        event: payload.event,
+        instanceName,
+        remoteJid,
+      });
       return new Response(JSON.stringify({ status: "ignored", reason: "API not active" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -676,14 +739,24 @@ serve(async (req) => {
     const { data: sellerInstance } = await supabase
       .from("whatsapp_seller_instances")
       .select("seller_id, is_connected, instance_blocked")
-      .eq("instance_name", instanceName)
+      .ilike("instance_name", instanceName)
       .maybeSingle();
     
     if (!sellerInstance || sellerInstance.instance_blocked) {
       console.log("Seller instance not found or blocked");
-      return new Response(JSON.stringify({ status: "ignored", reason: "Instance not found or blocked" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      await auditWebhook(supabase, {
+        status: "ignored",
+        reason: "Instance not found or blocked",
+        event: payload.event,
+        instanceName,
+        remoteJid,
       });
+      return new Response(
+        JSON.stringify({ status: "ignored", reason: "Instance not found or blocked" }),
+        {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
     
     const sellerId = sellerInstance.seller_id;
@@ -705,6 +778,14 @@ serve(async (req) => {
     
     if (!chatbotSettings.is_enabled) {
       console.log("Chatbot disabled for seller:", sellerId);
+      await auditWebhook(supabase, {
+        status: "ignored",
+        reason: "Chatbot disabled",
+        event: payload.event,
+        instanceName,
+        remoteJid,
+        sellerId,
+      });
       return new Response(JSON.stringify({ status: "ignored", reason: "Chatbot disabled" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -951,6 +1032,17 @@ serve(async (req) => {
       console.log("Response sent successfully");
     }
     
+    await auditWebhook(supabase, {
+      status: sent ? "sent" : "failed",
+      reason: sent ? null : "Send API returned not ok",
+      event: payload.event,
+      instanceName,
+      remoteJid,
+      sellerId,
+      rule: matchingRule?.name,
+      type: matchingRule?.response_type,
+    });
+
     return new Response(
       JSON.stringify({
         status: sent ? "sent" : "failed",
@@ -967,3 +1059,4 @@ serve(async (req) => {
     );
   }
 });
+;
