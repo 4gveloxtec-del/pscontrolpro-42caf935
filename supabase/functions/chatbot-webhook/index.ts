@@ -646,13 +646,16 @@ serve(async (req) => {
 
     // Diagnostic endpoint: GET request returns debug info
     if (req.method === "GET") {
+      const url = new URL(req.url);
+      const testApi = url.searchParams.get("test_api") === "true";
+      
       const { data: instances } = await supabase
         .from("whatsapp_seller_instances")
         .select("instance_name, seller_id, is_connected, instance_blocked, plan_status");
       
       const { data: globalConfig } = await supabase
         .from("whatsapp_global_config")
-        .select("api_url, is_active")
+        .select("api_url, api_token, is_active")
         .maybeSingle();
       
       const { data: chatbotSettings } = await supabase
@@ -661,14 +664,59 @@ serve(async (req) => {
       
       const { data: chatbotRules } = await supabase
         .from("chatbot_rules")
-        .select("seller_id, name, is_active, trigger_text");
+        .select("seller_id, name, is_active, trigger_text, response_type");
+      
+      let apiTestResult: any = null;
+      
+      // Test API connection if requested
+      if (testApi && globalConfig?.api_url && globalConfig?.api_token) {
+        try {
+          const baseUrl = normalizeApiUrl(globalConfig.api_url);
+          const testUrl = `${baseUrl}/instance/fetchInstances`;
+          
+          console.log(`[API Test] Testing URL: ${testUrl}`);
+          console.log(`[API Test] Token (first 10 chars): ${globalConfig.api_token.substring(0, 10)}...`);
+          
+          const testResponse = await fetch(testUrl, {
+            method: "GET",
+            headers: {
+              "apikey": globalConfig.api_token,
+            },
+          });
+          
+          const testResponseText = await testResponse.text();
+          console.log(`[API Test] Response status: ${testResponse.status}`);
+          console.log(`[API Test] Response body: ${testResponseText.substring(0, 500)}`);
+          
+          apiTestResult = {
+            url_tested: testUrl,
+            status: testResponse.status,
+            status_text: testResponse.statusText,
+            is_ok: testResponse.ok,
+            response_preview: testResponseText.substring(0, 300),
+            token_first_chars: globalConfig.api_token.substring(0, 10) + "...",
+            token_length: globalConfig.api_token.length,
+          };
+        } catch (error: any) {
+          apiTestResult = {
+            error: error.message,
+            url_configured: globalConfig.api_url,
+          };
+        }
+      }
       
       return new Response(JSON.stringify({
         status: "diagnostic",
         instances: instances || [],
-        globalConfig: globalConfig ? { api_url: globalConfig.api_url, is_active: globalConfig.is_active } : null,
+        globalConfig: globalConfig ? { 
+          api_url: globalConfig.api_url, 
+          is_active: globalConfig.is_active,
+          token_configured: !!globalConfig.api_token,
+          token_length: globalConfig.api_token?.length || 0,
+        } : null,
         chatbotSettings: chatbotSettings || [],
         chatbotRules: chatbotRules || [],
+        apiTestResult,
       }, null, 2), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
