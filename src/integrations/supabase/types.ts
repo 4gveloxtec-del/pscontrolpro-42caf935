@@ -89,6 +89,272 @@ export type Database = {
         }
         Relationships: []
       }
+      chatbot_contacts: {
+        Row: {
+          client_id: string | null
+          contact_status: string | null
+          created_at: string | null
+          first_interaction_at: string | null
+          id: string
+          interaction_count: number | null
+          last_buttons_sent_at: string | null
+          last_interaction_at: string | null
+          last_list_sent_at: string | null
+          last_response_at: string | null
+          name: string | null
+          phone: string
+          seller_id: string
+          updated_at: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          contact_status?: string | null
+          created_at?: string | null
+          first_interaction_at?: string | null
+          id?: string
+          interaction_count?: number | null
+          last_buttons_sent_at?: string | null
+          last_interaction_at?: string | null
+          last_list_sent_at?: string | null
+          last_response_at?: string | null
+          name?: string | null
+          phone: string
+          seller_id: string
+          updated_at?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          contact_status?: string | null
+          created_at?: string | null
+          first_interaction_at?: string | null
+          id?: string
+          interaction_count?: number | null
+          last_buttons_sent_at?: string | null
+          last_interaction_at?: string | null
+          last_list_sent_at?: string | null
+          last_response_at?: string | null
+          name?: string | null
+          phone?: string
+          seller_id?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_contacts_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_interactions: {
+        Row: {
+          block_reason: string | null
+          button_clicked: string | null
+          contact_id: string | null
+          id: string
+          incoming_message: string | null
+          list_selected: string | null
+          phone: string
+          response_sent: Json | null
+          response_type: string | null
+          rule_id: string | null
+          seller_id: string
+          sent_at: string | null
+          was_blocked: boolean | null
+        }
+        Insert: {
+          block_reason?: string | null
+          button_clicked?: string | null
+          contact_id?: string | null
+          id?: string
+          incoming_message?: string | null
+          list_selected?: string | null
+          phone: string
+          response_sent?: Json | null
+          response_type?: string | null
+          rule_id?: string | null
+          seller_id: string
+          sent_at?: string | null
+          was_blocked?: boolean | null
+        }
+        Update: {
+          block_reason?: string | null
+          button_clicked?: string | null
+          contact_id?: string | null
+          id?: string
+          incoming_message?: string | null
+          list_selected?: string | null
+          phone?: string
+          response_sent?: Json | null
+          response_type?: string | null
+          rule_id?: string | null
+          seller_id?: string
+          sent_at?: string | null
+          was_blocked?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_interactions_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "chatbot_interactions_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_rules"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_rules: {
+        Row: {
+          contact_filter: string | null
+          cooldown_hours: number | null
+          cooldown_mode: string | null
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          is_global_trigger: boolean | null
+          name: string
+          priority: number | null
+          response_content: Json
+          response_type: string | null
+          seller_id: string
+          template_id: string | null
+          trigger_text: string
+          updated_at: string | null
+        }
+        Insert: {
+          contact_filter?: string | null
+          cooldown_hours?: number | null
+          cooldown_mode?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_global_trigger?: boolean | null
+          name: string
+          priority?: number | null
+          response_content?: Json
+          response_type?: string | null
+          seller_id: string
+          template_id?: string | null
+          trigger_text: string
+          updated_at?: string | null
+        }
+        Update: {
+          contact_filter?: string | null
+          cooldown_hours?: number | null
+          cooldown_mode?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_global_trigger?: boolean | null
+          name?: string
+          priority?: number | null
+          response_content?: Json
+          response_type?: string | null
+          seller_id?: string
+          template_id?: string | null
+          trigger_text?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      chatbot_settings: {
+        Row: {
+          created_at: string | null
+          id: string
+          ignore_groups: boolean | null
+          ignore_own_messages: boolean | null
+          is_enabled: boolean | null
+          response_delay_max: number | null
+          response_delay_min: number | null
+          seller_id: string
+          updated_at: string | null
+          webhook_configured: boolean | null
+          webhook_url: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          ignore_groups?: boolean | null
+          ignore_own_messages?: boolean | null
+          is_enabled?: boolean | null
+          response_delay_max?: number | null
+          response_delay_min?: number | null
+          seller_id: string
+          updated_at?: string | null
+          webhook_configured?: boolean | null
+          webhook_url?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          ignore_groups?: boolean | null
+          ignore_own_messages?: boolean | null
+          is_enabled?: boolean | null
+          response_delay_max?: number | null
+          response_delay_min?: number | null
+          seller_id?: string
+          updated_at?: string | null
+          webhook_configured?: boolean | null
+          webhook_url?: string | null
+        }
+        Relationships: []
+      }
+      chatbot_templates: {
+        Row: {
+          contact_filter: string | null
+          cooldown_hours: number | null
+          cooldown_mode: string | null
+          created_at: string | null
+          created_by: string
+          description: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          response_content: Json
+          response_type: string | null
+          trigger_text: string
+          updated_at: string | null
+        }
+        Insert: {
+          contact_filter?: string | null
+          cooldown_hours?: number | null
+          cooldown_mode?: string | null
+          created_at?: string | null
+          created_by: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          response_content?: Json
+          response_type?: string | null
+          trigger_text: string
+          updated_at?: string | null
+        }
+        Update: {
+          contact_filter?: string | null
+          cooldown_hours?: number | null
+          cooldown_mode?: string | null
+          created_at?: string | null
+          created_by?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          response_content?: Json
+          response_type?: string | null
+          trigger_text?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       client_categories: {
         Row: {
           created_at: string | null
