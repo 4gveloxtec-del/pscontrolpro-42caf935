@@ -68,7 +68,7 @@ serve(async (req) => {
   };
 
   try {
-    console.log(`=== COMPLETE-BACKUP-IMPORT V3 - DUAL FORMAT SUPPORT ===`);
+    console.log(`=== COMPLETE-BACKUP-IMPORT V4 - MULTI FORMAT SUPPORT ===`);
     
     // ==========================================
     // 1. AUTENTICAÇÃO E VALIDAÇÃO DE ADMIN
@@ -138,16 +138,23 @@ serve(async (req) => {
     // DETECÇÃO DE FORMATO DO BACKUP
     // ==========================================
     const backupVersion = backup?.version || '1.0';
-    const backupType = backup?.type || 'seller_backup';
+    const backupFormat = backup?.format || '';
+    const backupType = backup?.type || '';
+    
+    // V1: seller backup com seller_id direto
     const isV1Format = backupVersion === '1.0' || backup?.user_id || backup?.user_email;
+    // V2: complete_clean_backup com seller_email
     const isV2Format = backupVersion === '2.0' || backupType === 'complete_clean_backup';
+    // V3: 3.0-complete-clean com _seller_email (clean-logical-keys)
+    const isV3Format = backupVersion?.includes('3.0') || backupFormat === 'clean-logical-keys';
     
     console.log(`=== FORMATO DETECTADO ===`);
-    console.log(`Version: ${backupVersion}, Type: ${backupType}`);
-    console.log(`V1 (seller_id): ${isV1Format}, V2 (seller_email): ${isV2Format}`);
+    console.log(`Version: ${backupVersion}, Format: ${backupFormat}, Type: ${backupType}`);
+    console.log(`V1 (seller_id): ${isV1Format}, V2 (seller_email): ${isV2Format}, V3 (_seller_email): ${isV3Format}`);
     console.log(`Backup keys:`, Object.keys(backup || {}));
     console.log(`Data keys:`, Object.keys(backup?.data || {}));
     console.log(`Modules selecionados:`, modules);
+    console.log(`Stats:`, backup?.stats);
 
     // Validar estrutura do backup
     if (!backup || !backup.data || typeof backup.data !== 'object') {
@@ -236,11 +243,6 @@ serve(async (req) => {
       return chunks;
     };
 
-    const isDuplicateError = (msg?: string) => {
-      const m = (msg || '').toLowerCase();
-      return m.includes('duplicate') || m.includes('unique') || m.includes('already exists');
-    };
-
     // Verificar se módulo deve ser importado
     const shouldImport = (moduleName: string): boolean => {
       if (!modules || modules.length === 0) return true;
@@ -250,37 +252,71 @@ serve(async (req) => {
     // ==========================================
     // 5. MAPAS DE RELACIONAMENTO
     // ==========================================
-    const sellerIdMap = new Map<string, string>(); // old_id -> new_id
-    const serverIdMap = new Map<string, string>(); // old_id -> new_id
-    const planIdMap = new Map<string, string>(); // old_id -> new_id
-    const clientIdMap = new Map<string, string>(); // old_id -> new_id
-    const extAppIdMap = new Map<string, string>(); // old_id -> new_id
-    const templateIdMap = new Map<string, string>(); // old_id -> new_id
-    const panelIdMap = new Map<string, string>(); // old_id -> new_id
+    // Para V1: old_id -> new_id
+    const sellerIdMap = new Map<string, string>();
+    const serverIdMap = new Map<string, string>();
+    const planIdMap = new Map<string, string>();
+    const clientIdMap = new Map<string, string>();
+    const extAppIdMap = new Map<string, string>();
+    const templateIdMap = new Map<string, string>();
+    const panelIdMap = new Map<string, string>();
     
-    // Para V2: email -> sellerId
+    // Para V2/V3: email -> sellerId, name -> id
     const emailToSellerId = new Map<string, string>();
-    const serverNameToId = new Map<string, string>();
-    const planNameToId = new Map<string, string>();
-    const clientIdentifierToId = new Map<string, string>();
-    const extAppNameToId = new Map<string, string>();
-    const templateNameToId = new Map<string, string>();
-    const panelNameToId = new Map<string, string>();
+    const serverNameToId = new Map<string, string>(); // email|name -> id
+    const planNameToId = new Map<string, string>(); // email|name -> id
+    const clientIdentifierToId = new Map<string, string>(); // email|identifier -> id
+    const extAppNameToId = new Map<string, string>(); // email|name -> id
+    const templateNameToId = new Map<string, string>(); // email|name -> id
+    const panelNameToId = new Map<string, string>(); // email|name -> id
 
     // Obter seller_id do backup V1
     const backupSellerId = backup?.user_id || backup?.user?.id;
-    const backupSellerEmail = backup?.user_email || backup?.user?.email;
     
-    // Mapear seller antigo para o admin atual (ou criar novo)
+    // Mapear seller antigo para o admin atual (para V1)
     if (isV1Format && backupSellerId) {
       sellerIdMap.set(backupSellerId, userId);
       console.log(`V1: Mapeando seller ${backupSellerId} -> ${userId}`);
     }
     
-    // Mapear email do admin
+    // Mapear email do admin atual
     if (userEmail) {
       emailToSellerId.set(userEmail, userId);
     }
+
+    // ==========================================
+    // HELPER: Obter seller email do item
+    // ==========================================
+    const getSellerEmail = (item: any): string | null => {
+      // V3: usa _seller_email
+      if (item._seller_email) return item._seller_email;
+      // V2: usa seller_email
+      if (item.seller_email) return item.seller_email;
+      // Fallback: email do item (para profiles)
+      if (item.email) return item.email;
+      return null;
+    };
+
+    // ==========================================
+    // HELPER: Obter seller_id para import
+    // ==========================================
+    const getImportSellerId = (item: any): string | null => {
+      // V1: usa seller_id diretamente do backup, mapeado para novo
+      if (isV1Format && !isV3Format && !isV2Format) {
+        const oldSellerId = item.seller_id || backupSellerId;
+        return sellerIdMap.get(oldSellerId) || userId;
+      }
+      
+      // V2/V3: usa email para mapear
+      const email = getSellerEmail(item);
+      if (email) {
+        const mappedId = emailToSellerId.get(email);
+        if (mappedId) return mappedId;
+        console.log(`Warning: Email não mapeado: ${email}`);
+      }
+      
+      return null;
+    };
 
     // ==========================================
     // 6. MODO REPLACE - LIMPAR BASE
@@ -290,7 +326,7 @@ serve(async (req) => {
       currentTable = 'cleanup';
 
       try {
-        // Limpar dados do admin atual primeiro (para evitar duplicatas)
+        // Tabelas para limpar (ordem respeitando FKs)
         const deleteTablesForAdmin = [
           'client_notification_tracking',
           'client_external_apps',
@@ -312,11 +348,37 @@ serve(async (req) => {
           'monthly_profits',
         ];
 
+        // Limpar dados de TODOS os sellers (não apenas do admin atual)
+        // Pegar todos os seller_ids dos profiles no backup
+        const backupProfiles = backup.data.profiles || [];
+        const backupEmails = new Set(backupProfiles.map((p: any) => p.email));
+        
+        // Buscar IDs dos sellers que existem
+        const { data: existingProfiles } = await supabase
+          .from('profiles')
+          .select('id, email');
+        
+        const sellersToClean = (existingProfiles || [])
+          .filter((p: any) => backupEmails.has(p.email) || p.id === userId)
+          .map((p: any) => p.id);
+
+        console.log(`Limpando dados de ${sellersToClean.length} sellers...`);
+
         for (const table of deleteTablesForAdmin) {
-          const { error } = await supabase.from(table).delete().eq('seller_id', userId);
-          if (error) {
-            console.log(`Warning: Falha ao limpar ${table}: ${error.message}`);
+          for (const sellerId of sellersToClean) {
+            const { error } = await supabase.from(table).delete().eq('seller_id', sellerId);
+            if (error && !error.message.includes('0 rows')) {
+              console.log(`Warning: ${table}: ${error.message}`);
+            }
           }
+        }
+        
+        // Limpar tabelas globais se aplicável
+        if (shouldImport('default_server_icons')) {
+          await supabase.from('default_server_icons').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+        }
+        if (shouldImport('app_settings')) {
+          await supabase.from('app_settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
         }
         
         console.log('Base limpa com sucesso');
@@ -331,30 +393,13 @@ serve(async (req) => {
     }
 
     // ==========================================
-    // 7. IMPORTAÇÃO - SUPORTE A V1 E V2
+    // 7. IMPORTAÇÃO
     // ==========================================
 
-    // Helper para obter seller_id correto
-    const getImportSellerId = (item: any): string | null => {
-      // V1: usa seller_id diretamente do backup, mapeado para novo
-      if (isV1Format) {
-        const oldSellerId = item.seller_id || backupSellerId;
-        return sellerIdMap.get(oldSellerId) || userId; // Fallback para admin atual
-      }
-      
-      // V2: usa seller_email para mapear
-      const email = item.seller_email || item._seller_email || item.email;
-      if (email) {
-        return emailToSellerId.get(email) || null;
-      }
-      
-      return userId; // Default para admin atual
-    };
-
     // ----------------------------------------
-    // 1. PROFILES (V2 only - V1 não precisa criar profiles novos)
+    // 1. PROFILES - Criar/mapear usuários
     // ----------------------------------------
-    if (shouldImport('profiles') && isV2Format) {
+    if (shouldImport('profiles')) {
       const tableData = backup.data.profiles || [];
       if (tableData.length > 0) {
         currentTable = 'profiles';
@@ -377,7 +422,27 @@ serve(async (req) => {
             .single();
 
           if (existing) {
+            // Mapear email para ID existente
             emailToSellerId.set(profileEmail, existing.id);
+            console.log(`Profile existente: ${profileEmail} -> ${existing.id}`);
+            
+            // Atualizar dados do profile se em modo replace
+            if (mode === 'replace') {
+              await supabase
+                .from('profiles')
+                .update({
+                  full_name: profile.full_name,
+                  whatsapp: profile.whatsapp,
+                  company_name: profile.company_name,
+                  pix_key: profile.pix_key,
+                  is_active: profile.is_active,
+                  is_permanent: profile.is_permanent,
+                  subscription_expires_at: profile.subscription_expires_at,
+                  tutorial_visto: profile.tutorial_visto,
+                })
+                .eq('id', existing.id);
+              count++;
+            }
             processedItems++;
             continue;
           }
@@ -398,16 +463,20 @@ serve(async (req) => {
           }
 
           emailToSellerId.set(profileEmail, authUser.user.id);
+          console.log(`Profile criado: ${profileEmail} -> ${authUser.user.id}`);
 
+          // Atualizar profile com dados do backup
           await supabase
             .from('profiles')
             .update({
+              full_name: profile.full_name,
+              whatsapp: profile.whatsapp,
               company_name: profile.company_name,
               pix_key: profile.pix_key,
               is_active: profile.is_active,
               is_permanent: profile.is_permanent,
               subscription_expires_at: profile.subscription_expires_at,
-              notification_days_before: profile.notification_days_before,
+              tutorial_visto: profile.tutorial_visto,
               needs_password_update: true,
             })
             .eq('id', authUser.user.id);
@@ -420,6 +489,9 @@ serve(async (req) => {
       }
     }
 
+    console.log(`Email->SellerId mappings: ${emailToSellerId.size}`);
+    emailToSellerId.forEach((v, k) => console.log(`  ${k} -> ${v}`));
+
     // ----------------------------------------
     // 2. SERVERS
     // ----------------------------------------
@@ -431,9 +503,12 @@ serve(async (req) => {
 
         let count = 0;
         for (const server of tableData) {
+          const sellerEmail = getSellerEmail(server);
           const sellerId = getImportSellerId(server);
+          
           if (!sellerId) {
             results.skipped.servers = (results.skipped.servers || 0) + 1;
+            results.warnings.push(`Servidor "${server.name}": seller não encontrado (${sellerEmail})`);
             processedItems++;
             continue;
           }
@@ -465,7 +540,8 @@ serve(async (req) => {
 
           if (!error && inserted) {
             if (oldId) serverIdMap.set(oldId, inserted.id);
-            serverNameToId.set(serverName, inserted.id);
+            // Mapear por email|name para V2/V3
+            serverNameToId.set(`${sellerEmail}|${serverName}`, inserted.id);
             count++;
           } else if (error) {
             results.errors.push(`Servidor "${serverName}": ${error.message}`);
@@ -488,7 +564,9 @@ serve(async (req) => {
 
         let count = 0;
         for (const plan of tableData) {
+          const sellerEmail = getSellerEmail(plan);
           const sellerId = getImportSellerId(plan);
+          
           if (!sellerId) {
             results.skipped.plans = (results.skipped.plans || 0) + 1;
             processedItems++;
@@ -515,7 +593,7 @@ serve(async (req) => {
 
           if (!error && inserted) {
             if (oldId) planIdMap.set(oldId, inserted.id);
-            planNameToId.set(planName, inserted.id);
+            planNameToId.set(`${sellerEmail}|${planName}`, inserted.id);
             count++;
           } else if (error) {
             results.errors.push(`Plano "${planName}": ${error.message}`);
@@ -538,7 +616,9 @@ serve(async (req) => {
 
         let count = 0;
         for (const client of tableData) {
+          const sellerEmail = getSellerEmail(client);
           const sellerId = getImportSellerId(client);
+          
           if (!sellerId) {
             results.skipped.clients = (results.skipped.clients || 0) + 1;
             processedItems++;
@@ -551,22 +631,26 @@ serve(async (req) => {
           let serverId = null;
           let planId = null;
           
-          if (isV1Format) {
+          if (isV1Format && !isV3Format && !isV2Format) {
             // V1: mapear IDs antigos para novos
             if (client.server_id) serverId = serverIdMap.get(client.server_id);
             if (client.plan_id) planId = planIdMap.get(client.plan_id);
           } else {
-            // V2: buscar por nome
-            if (client.server_name) serverId = serverNameToId.get(client.server_name);
-            if (client.plan_name) planId = planNameToId.get(client.plan_name);
+            // V2/V3: buscar por email|nome
+            if (client.server_name) {
+              serverId = serverNameToId.get(`${sellerEmail}|${client.server_name}`);
+            }
+            if (client.plan_name) {
+              planId = planNameToId.get(`${sellerEmail}|${client.plan_name}`);
+            }
           }
 
           // Resolver server_id_2
           let serverId2 = null;
-          if (isV1Format && client.server_id_2) {
+          if (isV1Format && !isV3Format && !isV2Format && client.server_id_2) {
             serverId2 = serverIdMap.get(client.server_id_2);
           } else if (client.server_name_2) {
-            serverId2 = serverNameToId.get(client.server_name_2);
+            serverId2 = serverNameToId.get(`${sellerEmail}|${client.server_name_2}`);
           }
 
           const { data: inserted, error } = await supabase
@@ -619,8 +703,9 @@ serve(async (req) => {
 
           if (!error && inserted) {
             if (oldId) clientIdMap.set(oldId, inserted.id);
-            const identifier = client.email || client.phone || client.name;
-            clientIdentifierToId.set(identifier, inserted.id);
+            // Mapear por identifier para V2/V3
+            const identifier = client._identifier || client.email || client.phone || client.name;
+            clientIdentifierToId.set(`${sellerEmail}|${identifier}`, inserted.id);
             count++;
           } else if (error) {
             results.errors.push(`Cliente "${client.name}": ${error.message}`);
@@ -682,19 +767,19 @@ serve(async (req) => {
 
         let count = 0;
         for (const ref of tableData) {
+          const sellerEmail = getSellerEmail(ref);
           const sellerId = getImportSellerId(ref);
           if (!sellerId) { processedItems++; continue; }
 
-          // Resolver client IDs
           let referrerId = null;
           let referredId = null;
 
-          if (isV1Format) {
+          if (isV1Format && !isV3Format && !isV2Format) {
             if (ref.referrer_client_id) referrerId = clientIdMap.get(ref.referrer_client_id);
             if (ref.referred_client_id) referredId = clientIdMap.get(ref.referred_client_id);
           } else {
-            if (ref.referrer_identifier) referrerId = clientIdentifierToId.get(ref.referrer_identifier);
-            if (ref.referred_identifier) referredId = clientIdentifierToId.get(ref.referred_identifier);
+            if (ref._referrer_identifier) referrerId = clientIdentifierToId.get(`${sellerEmail}|${ref._referrer_identifier}`);
+            if (ref._referred_identifier) referredId = clientIdentifierToId.get(`${sellerEmail}|${ref._referred_identifier}`);
           }
 
           if (!referrerId || !referredId) { processedItems++; continue; }
@@ -729,6 +814,7 @@ serve(async (req) => {
 
         let count = 0;
         for (const template of tableData) {
+          const sellerEmail = getSellerEmail(template);
           const sellerId = getImportSellerId(template);
           if (!sellerId) { processedItems++; continue; }
 
@@ -748,7 +834,7 @@ serve(async (req) => {
 
           if (!error && inserted) {
             if (oldId) templateIdMap.set(oldId, inserted.id);
-            templateNameToId.set(template.name, inserted.id);
+            templateNameToId.set(`${sellerEmail}|${template.name}`, inserted.id);
             count++;
           }
           processedItems++;
@@ -806,6 +892,7 @@ serve(async (req) => {
 
         let count = 0;
         for (const panel of tableData) {
+          const sellerEmail = getSellerEmail(panel);
           const sellerId = getImportSellerId(panel);
           if (!sellerId) { processedItems++; continue; }
 
@@ -836,7 +923,7 @@ serve(async (req) => {
 
           if (!error && inserted) {
             if (oldId) panelIdMap.set(oldId, inserted.id);
-            panelNameToId.set(panel.name, inserted.id);
+            panelNameToId.set(`${sellerEmail}|${panel.name}`, inserted.id);
             count++;
           }
           processedItems++;
@@ -857,18 +944,19 @@ serve(async (req) => {
 
         let count = 0;
         for (const pc of tableData) {
+          const sellerEmail = getSellerEmail(pc);
           const sellerId = getImportSellerId(pc);
           if (!sellerId) { processedItems++; continue; }
 
           let clientId = null;
           let panelId = null;
 
-          if (isV1Format) {
+          if (isV1Format && !isV3Format && !isV2Format) {
             if (pc.client_id) clientId = clientIdMap.get(pc.client_id);
             if (pc.panel_id) panelId = panelIdMap.get(pc.panel_id);
           } else {
-            if (pc.client_identifier) clientId = clientIdentifierToId.get(pc.client_identifier);
-            if (pc.panel_name) panelId = panelNameToId.get(pc.panel_name);
+            if (pc._client_identifier) clientId = clientIdentifierToId.get(`${sellerEmail}|${pc._client_identifier}`);
+            if (pc._panel_name) panelId = panelNameToId.get(`${sellerEmail}|${pc._panel_name}`);
           }
 
           if (!clientId || !panelId) { processedItems++; continue; }
@@ -904,18 +992,19 @@ serve(async (req) => {
         const rows: any[] = [];
 
         for (const msg of tableData) {
+          const sellerEmail = getSellerEmail(msg);
           const sellerId = getImportSellerId(msg);
           if (!sellerId) { skipped++; processedItems++; continue; }
 
           let clientId = null;
           let templateId = null;
 
-          if (isV1Format) {
+          if (isV1Format && !isV3Format && !isV2Format) {
             if (msg.client_id) clientId = clientIdMap.get(msg.client_id);
             if (msg.template_id) templateId = templateIdMap.get(msg.template_id);
           } else {
-            if (msg.client_identifier) clientId = clientIdentifierToId.get(msg.client_identifier);
-            if (msg.template_name) templateId = templateNameToId.get(msg.template_name);
+            if (msg._client_identifier) clientId = clientIdentifierToId.get(`${sellerEmail}|${msg._client_identifier}`);
+            if (msg._template_name) templateId = templateNameToId.get(`${sellerEmail}|${msg._template_name}`);
           }
 
           if (!clientId) { skipped++; processedItems++; continue; }
@@ -989,6 +1078,7 @@ serve(async (req) => {
 
         let count = 0;
         for (const app of tableData) {
+          const sellerEmail = getSellerEmail(app);
           const sellerId = getImportSellerId(app);
           if (!sellerId) { processedItems++; continue; }
 
@@ -1011,7 +1101,7 @@ serve(async (req) => {
 
           if (!error && inserted) {
             if (oldId) extAppIdMap.set(oldId, inserted.id);
-            extAppNameToId.set(app.name, inserted.id);
+            extAppNameToId.set(`${sellerEmail}|${app.name}`, inserted.id);
             count++;
           }
           processedItems++;
@@ -1032,18 +1122,19 @@ serve(async (req) => {
 
         let count = 0;
         for (const app of tableData) {
+          const sellerEmail = getSellerEmail(app);
           const sellerId = getImportSellerId(app);
           if (!sellerId) { processedItems++; continue; }
 
           let clientId = null;
           let extAppId = null;
 
-          if (isV1Format) {
+          if (isV1Format && !isV3Format && !isV2Format) {
             if (app.client_id) clientId = clientIdMap.get(app.client_id);
             if (app.external_app_id) extAppId = extAppIdMap.get(app.external_app_id);
           } else {
-            if (app.client_identifier) clientId = clientIdentifierToId.get(app.client_identifier);
-            if (app.app_name) extAppId = extAppNameToId.get(app.app_name);
+            if (app._client_identifier) clientId = clientIdentifierToId.get(`${sellerEmail}|${app._client_identifier}`);
+            if (app._app_name) extAppId = extAppNameToId.get(`${sellerEmail}|${app._app_name}`);
           }
 
           if (!clientId || !extAppId) { processedItems++; continue; }
@@ -1080,15 +1171,16 @@ serve(async (req) => {
 
         let count = 0;
         for (const acc of tableData) {
+          const sellerEmail = getSellerEmail(acc);
           const sellerId = getImportSellerId(acc);
           if (!sellerId) { processedItems++; continue; }
 
           let clientId = null;
 
-          if (isV1Format) {
+          if (isV1Format && !isV3Format && !isV2Format) {
             if (acc.client_id) clientId = clientIdMap.get(acc.client_id);
           } else {
-            if (acc.client_identifier) clientId = clientIdentifierToId.get(acc.client_identifier);
+            if (acc._client_identifier) clientId = clientIdentifierToId.get(`${sellerEmail}|${acc._client_identifier}`);
           }
 
           if (!clientId) { processedItems++; continue; }
@@ -1248,14 +1340,15 @@ serve(async (req) => {
 
         let count = 0;
         for (const app of tableData) {
+          const sellerEmail = getSellerEmail(app);
           const sellerId = getImportSellerId(app);
           if (!sellerId) { processedItems++; continue; }
 
           let serverId = null;
-          if (isV1Format) {
+          if (isV1Format && !isV3Format && !isV2Format) {
             if (app.server_id) serverId = serverIdMap.get(app.server_id);
           } else {
-            if (app.server_name) serverId = serverNameToId.get(app.server_name);
+            if (app._server_name) serverId = serverNameToId.get(`${sellerEmail}|${app._server_name}`);
           }
 
           if (!serverId) { processedItems++; continue; }
@@ -1308,11 +1401,13 @@ serve(async (req) => {
         .eq('id', jobId);
     }
 
+    const detectedFormat = isV3Format ? 'v3 (clean-logical-keys)' : isV2Format ? 'v2 (seller_email)' : 'v1 (seller_id)';
+
     return new Response(
       JSON.stringify({
         success: true,
         message: 'Restore concluído com sucesso',
-        format: isV1Format ? 'v1' : 'v2',
+        format: detectedFormat,
         restored: results.restored,
         skipped: results.skipped,
         errors: results.errors,
