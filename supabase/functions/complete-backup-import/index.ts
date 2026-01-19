@@ -68,7 +68,7 @@ serve(async (req) => {
   };
 
   try {
-    console.log(`=== COMPLETE-BACKUP-IMPORT V4 - MULTI FORMAT SUPPORT ===`);
+    console.log(`=== COMPLETE-BACKUP-IMPORT V5 - FIX SELLER MAPPING ===`);
     
     // ==========================================
     // 1. AUTENTICAÇÃO E VALIDAÇÃO DE ADMIN
@@ -91,15 +91,15 @@ serve(async (req) => {
       );
     }
 
-    const userId = userData.user.id;
-    const userEmail = userData.user.email;
-    console.log(`Usuário autenticado: ${userEmail} (${userId})`);
+    const adminUserId = userData.user.id;
+    const adminEmail = userData.user.email;
+    console.log(`Admin autenticado: ${adminEmail} (${adminUserId})`);
 
     // Verificar role de admin
     const { data: roleRows, error: roleError } = await supabase
       .from('user_roles')
       .select('role')
-      .eq('user_id', userId);
+      .eq('user_id', adminUserId);
 
     if (roleError) {
       return new Response(
@@ -139,18 +139,13 @@ serve(async (req) => {
     // ==========================================
     const backupVersion = backup?.version || '1.0';
     const backupFormat = backup?.format || '';
-    const backupType = backup?.type || '';
     
-    // V1: seller backup com seller_id direto
-    const isV1Format = backupVersion === '1.0' || backup?.user_id || backup?.user_email;
-    // V2: complete_clean_backup com seller_email
-    const isV2Format = backupVersion === '2.0' || backupType === 'complete_clean_backup';
     // V3: 3.0-complete-clean com _seller_email (clean-logical-keys)
     const isV3Format = backupVersion?.includes('3.0') || backupFormat === 'clean-logical-keys';
     
     console.log(`=== FORMATO DETECTADO ===`);
-    console.log(`Version: ${backupVersion}, Format: ${backupFormat}, Type: ${backupType}`);
-    console.log(`V1 (seller_id): ${isV1Format}, V2 (seller_email): ${isV2Format}, V3 (_seller_email): ${isV3Format}`);
+    console.log(`Version: ${backupVersion}, Format: ${backupFormat}`);
+    console.log(`É formato V3 (clean-logical-keys): ${isV3Format}`);
     console.log(`Backup keys:`, Object.keys(backup || {}));
     console.log(`Data keys:`, Object.keys(backup?.data || {}));
     console.log(`Modules selecionados:`, modules);
@@ -252,48 +247,31 @@ serve(async (req) => {
     // ==========================================
     // 5. MAPAS DE RELACIONAMENTO
     // ==========================================
-    // Para V1: old_id -> new_id
-    const sellerIdMap = new Map<string, string>();
-    const serverIdMap = new Map<string, string>();
-    const planIdMap = new Map<string, string>();
-    const clientIdMap = new Map<string, string>();
-    const extAppIdMap = new Map<string, string>();
-    const templateIdMap = new Map<string, string>();
-    const panelIdMap = new Map<string, string>();
-    
-    // Para V2/V3: email -> sellerId, name -> id
+    // email -> sellerId (criado ou existente)
     const emailToSellerId = new Map<string, string>();
-    const serverNameToId = new Map<string, string>(); // email|name -> id
-    const planNameToId = new Map<string, string>(); // email|name -> id
-    const clientIdentifierToId = new Map<string, string>(); // email|identifier -> id
-    const extAppNameToId = new Map<string, string>(); // email|name -> id
-    const templateNameToId = new Map<string, string>(); // email|name -> id
-    const panelNameToId = new Map<string, string>(); // email|name -> id
+    
+    // Para mapear relacionamentos dentro do mesmo seller
+    // Formato: email|name -> id
+    const serverNameToId = new Map<string, string>();
+    const planNameToId = new Map<string, string>();
+    const clientIdentifierToId = new Map<string, string>();
+    const extAppNameToId = new Map<string, string>();
+    const templateNameToId = new Map<string, string>();
+    const panelNameToId = new Map<string, string>();
 
-    // Obter seller_id do backup V1
-    const backupSellerId = backup?.user_id || backup?.user?.id;
-    
-    // Mapear seller antigo para o admin atual (para V1)
-    if (isV1Format && backupSellerId) {
-      sellerIdMap.set(backupSellerId, userId);
-      console.log(`V1: Mapeando seller ${backupSellerId} -> ${userId}`);
-    }
-    
     // Mapear email do admin atual
-    if (userEmail) {
-      emailToSellerId.set(userEmail, userId);
+    if (adminEmail) {
+      emailToSellerId.set(adminEmail, adminUserId);
     }
 
     // ==========================================
-    // HELPER: Obter seller email do item
+    // HELPER: Obter seller email do item (V3)
     // ==========================================
     const getSellerEmail = (item: any): string | null => {
       // V3: usa _seller_email
       if (item._seller_email) return item._seller_email;
-      // V2: usa seller_email
-      if (item.seller_email) return item.seller_email;
-      // Fallback: email do item (para profiles)
-      if (item.email) return item.email;
+      // Para profiles, o email é o próprio identificador
+      if (item.email && !item._seller_email) return item.email;
       return null;
     };
 
@@ -301,20 +279,12 @@ serve(async (req) => {
     // HELPER: Obter seller_id para import
     // ==========================================
     const getImportSellerId = (item: any): string | null => {
-      // V1: usa seller_id diretamente do backup, mapeado para novo
-      if (isV1Format && !isV3Format && !isV2Format) {
-        const oldSellerId = item.seller_id || backupSellerId;
-        return sellerIdMap.get(oldSellerId) || userId;
-      }
-      
-      // V2/V3: usa email para mapear
       const email = getSellerEmail(item);
       if (email) {
         const mappedId = emailToSellerId.get(email);
         if (mappedId) return mappedId;
         console.log(`Warning: Email não mapeado: ${email}`);
       }
-      
       return null;
     };
 
@@ -326,8 +296,24 @@ serve(async (req) => {
       currentTable = 'cleanup';
 
       try {
+        // Pegar todos os emails dos profiles no backup
+        const backupProfiles = backup.data.profiles || [];
+        const backupEmails = new Set(backupProfiles.map((p: any) => p.email));
+        
+        // Buscar IDs dos sellers que existem
+        const { data: existingProfiles } = await supabase
+          .from('profiles')
+          .select('id, email');
+        
+        const sellersToClean = (existingProfiles || [])
+          .filter((p: any) => backupEmails.has(p.email) || p.id === adminUserId)
+          .map((p: any) => p.id);
+
+        console.log(`Limpando dados de ${sellersToClean.length} sellers...`);
+        console.log(`Emails no backup:`, Array.from(backupEmails));
+
         // Tabelas para limpar (ordem respeitando FKs)
-        const deleteTablesForAdmin = [
+        const deleteTablesForSeller = [
           'client_notification_tracking',
           'client_external_apps',
           'client_premium_accounts',
@@ -348,27 +334,11 @@ serve(async (req) => {
           'monthly_profits',
         ];
 
-        // Limpar dados de TODOS os sellers (não apenas do admin atual)
-        // Pegar todos os seller_ids dos profiles no backup
-        const backupProfiles = backup.data.profiles || [];
-        const backupEmails = new Set(backupProfiles.map((p: any) => p.email));
-        
-        // Buscar IDs dos sellers que existem
-        const { data: existingProfiles } = await supabase
-          .from('profiles')
-          .select('id, email');
-        
-        const sellersToClean = (existingProfiles || [])
-          .filter((p: any) => backupEmails.has(p.email) || p.id === userId)
-          .map((p: any) => p.id);
-
-        console.log(`Limpando dados de ${sellersToClean.length} sellers...`);
-
-        for (const table of deleteTablesForAdmin) {
+        for (const table of deleteTablesForSeller) {
           for (const sellerId of sellersToClean) {
             const { error } = await supabase.from(table).delete().eq('seller_id', sellerId);
             if (error && !error.message.includes('0 rows')) {
-              console.log(`Warning: ${table}: ${error.message}`);
+              console.log(`Warning cleanup ${table}: ${error.message}`);
             }
           }
         }
@@ -397,7 +367,7 @@ serve(async (req) => {
     // ==========================================
 
     // ----------------------------------------
-    // 1. PROFILES - Criar/mapear usuários
+    // 1. PROFILES - Criar/mapear usuários PRIMEIRO
     // ----------------------------------------
     if (shouldImport('profiles')) {
       const tableData = backup.data.profiles || [];
@@ -489,7 +459,7 @@ serve(async (req) => {
       }
     }
 
-    console.log(`Email->SellerId mappings: ${emailToSellerId.size}`);
+    console.log(`=== Email->SellerId mappings (${emailToSellerId.size}) ===`);
     emailToSellerId.forEach((v, k) => console.log(`  ${k} -> ${v}`));
 
     // ----------------------------------------
@@ -502,18 +472,18 @@ serve(async (req) => {
         console.log(`=== IMPORTANDO SERVERS (${tableData.length}) ===`);
 
         let count = 0;
+        let skipped = 0;
         for (const server of tableData) {
           const sellerEmail = getSellerEmail(server);
           const sellerId = getImportSellerId(server);
           
           if (!sellerId) {
-            results.skipped.servers = (results.skipped.servers || 0) + 1;
+            skipped++;
             results.warnings.push(`Servidor "${server.name}": seller não encontrado (${sellerEmail})`);
             processedItems++;
             continue;
           }
 
-          const oldId = server.id;
           const serverName = server.name;
 
           const { data: inserted, error } = await supabase
@@ -539,9 +509,9 @@ serve(async (req) => {
             .single();
 
           if (!error && inserted) {
-            if (oldId) serverIdMap.set(oldId, inserted.id);
-            // Mapear por email|name para V2/V3
+            // Mapear por email|name para resolver clients depois
             serverNameToId.set(`${sellerEmail}|${serverName}`, inserted.id);
+            console.log(`Server mapeado: ${sellerEmail}|${serverName} -> ${inserted.id}`);
             count++;
           } else if (error) {
             results.errors.push(`Servidor "${serverName}": ${error.message}`);
@@ -549,9 +519,12 @@ serve(async (req) => {
           processedItems++;
         }
         results.restored.servers = count;
+        if (skipped > 0) results.skipped.servers = skipped;
         await updateProgress();
       }
     }
+
+    console.log(`=== Server mappings (${serverNameToId.size}) ===`);
 
     // ----------------------------------------
     // 3. PLANS
@@ -563,17 +536,17 @@ serve(async (req) => {
         console.log(`=== IMPORTANDO PLANS (${tableData.length}) ===`);
 
         let count = 0;
+        let skipped = 0;
         for (const plan of tableData) {
           const sellerEmail = getSellerEmail(plan);
           const sellerId = getImportSellerId(plan);
           
           if (!sellerId) {
-            results.skipped.plans = (results.skipped.plans || 0) + 1;
+            skipped++;
             processedItems++;
             continue;
           }
 
-          const oldId = plan.id;
           const planName = plan.name;
 
           const { data: inserted, error } = await supabase
@@ -592,7 +565,6 @@ serve(async (req) => {
             .single();
 
           if (!error && inserted) {
-            if (oldId) planIdMap.set(oldId, inserted.id);
             planNameToId.set(`${sellerEmail}|${planName}`, inserted.id);
             count++;
           } else if (error) {
@@ -601,9 +573,12 @@ serve(async (req) => {
           processedItems++;
         }
         results.restored.plans = count;
+        if (skipped > 0) results.skipped.plans = skipped;
         await updateProgress();
       }
     }
+
+    console.log(`=== Plan mappings (${planNameToId.size}) ===`);
 
     // ----------------------------------------
     // 4. CLIENTS
@@ -615,41 +590,42 @@ serve(async (req) => {
         console.log(`=== IMPORTANDO CLIENTS (${tableData.length}) ===`);
 
         let count = 0;
+        let skipped = 0;
         for (const client of tableData) {
           const sellerEmail = getSellerEmail(client);
           const sellerId = getImportSellerId(client);
           
           if (!sellerId) {
-            results.skipped.clients = (results.skipped.clients || 0) + 1;
+            skipped++;
+            results.warnings.push(`Cliente "${client.name}": seller não encontrado (${sellerEmail})`);
             processedItems++;
             continue;
           }
-
-          const oldId = client.id;
           
-          // Resolver server_id e plan_id
+          // Resolver server_id e plan_id por nome
           let serverId = null;
           let planId = null;
           
-          if (isV1Format && !isV3Format && !isV2Format) {
-            // V1: mapear IDs antigos para novos
-            if (client.server_id) serverId = serverIdMap.get(client.server_id);
-            if (client.plan_id) planId = planIdMap.get(client.plan_id);
-          } else {
-            // V2/V3: buscar por email|nome
-            if (client.server_name) {
-              serverId = serverNameToId.get(`${sellerEmail}|${client.server_name}`);
+          if (client.server_name) {
+            serverId = serverNameToId.get(`${sellerEmail}|${client.server_name}`);
+            if (!serverId) {
+              // Tentar variações (com/sem espaços extras)
+              const normalizedName = client.server_name.trim();
+              serverId = serverNameToId.get(`${sellerEmail}|${normalizedName}`);
             }
-            if (client.plan_name) {
-              planId = planNameToId.get(`${sellerEmail}|${client.plan_name}`);
+          }
+          
+          if (client.plan_name) {
+            planId = planNameToId.get(`${sellerEmail}|${client.plan_name}`);
+            if (!planId) {
+              const normalizedName = client.plan_name.trim();
+              planId = planNameToId.get(`${sellerEmail}|${normalizedName}`);
             }
           }
 
           // Resolver server_id_2
           let serverId2 = null;
-          if (isV1Format && !isV3Format && !isV2Format && client.server_id_2) {
-            serverId2 = serverIdMap.get(client.server_id_2);
-          } else if (client.server_name_2) {
+          if (client.server_name_2) {
             serverId2 = serverNameToId.get(`${sellerEmail}|${client.server_name_2}`);
           }
 
@@ -702,8 +678,7 @@ serve(async (req) => {
             .single();
 
           if (!error && inserted) {
-            if (oldId) clientIdMap.set(oldId, inserted.id);
-            // Mapear por identifier para V2/V3
+            // Mapear por identifier para tabelas relacionadas
             const identifier = client._identifier || client.email || client.phone || client.name;
             clientIdentifierToId.set(`${sellerEmail}|${identifier}`, inserted.id);
             count++;
@@ -715,9 +690,12 @@ serve(async (req) => {
           if (processedItems % 50 === 0) await updateProgress();
         }
         results.restored.clients = count;
+        if (skipped > 0) results.skipped.clients = skipped;
         await updateProgress();
       }
     }
+
+    console.log(`=== Client mappings (${clientIdentifierToId.size}) ===`);
 
     // ----------------------------------------
     // 5. COUPONS
@@ -774,12 +752,11 @@ serve(async (req) => {
           let referrerId = null;
           let referredId = null;
 
-          if (isV1Format && !isV3Format && !isV2Format) {
-            if (ref.referrer_client_id) referrerId = clientIdMap.get(ref.referrer_client_id);
-            if (ref.referred_client_id) referredId = clientIdMap.get(ref.referred_client_id);
-          } else {
-            if (ref._referrer_identifier) referrerId = clientIdentifierToId.get(`${sellerEmail}|${ref._referrer_identifier}`);
-            if (ref._referred_identifier) referredId = clientIdentifierToId.get(`${sellerEmail}|${ref._referred_identifier}`);
+          if (ref._referrer_identifier) {
+            referrerId = clientIdentifierToId.get(`${sellerEmail}|${ref._referrer_identifier}`);
+          }
+          if (ref._referred_identifier) {
+            referredId = clientIdentifierToId.get(`${sellerEmail}|${ref._referred_identifier}`);
           }
 
           if (!referrerId || !referredId) { processedItems++; continue; }
@@ -813,12 +790,16 @@ serve(async (req) => {
         console.log(`=== IMPORTANDO WHATSAPP_TEMPLATES (${tableData.length}) ===`);
 
         let count = 0;
+        let skipped = 0;
         for (const template of tableData) {
           const sellerEmail = getSellerEmail(template);
           const sellerId = getImportSellerId(template);
-          if (!sellerId) { processedItems++; continue; }
-
-          const oldId = template.id;
+          
+          if (!sellerId) { 
+            skipped++;
+            processedItems++; 
+            continue; 
+          }
 
           const { data: inserted, error } = await supabase
             .from('whatsapp_templates')
@@ -833,13 +814,13 @@ serve(async (req) => {
             .single();
 
           if (!error && inserted) {
-            if (oldId) templateIdMap.set(oldId, inserted.id);
             templateNameToId.set(`${sellerEmail}|${template.name}`, inserted.id);
             count++;
           }
           processedItems++;
         }
         results.restored.whatsapp_templates = count;
+        if (skipped > 0) results.skipped.whatsapp_templates = skipped;
         await updateProgress();
       }
     }
@@ -896,8 +877,6 @@ serve(async (req) => {
           const sellerId = getImportSellerId(panel);
           if (!sellerId) { processedItems++; continue; }
 
-          const oldId = panel.id;
-
           const { data: inserted, error } = await supabase
             .from('shared_panels')
             .insert({
@@ -922,7 +901,6 @@ serve(async (req) => {
             .single();
 
           if (!error && inserted) {
-            if (oldId) panelIdMap.set(oldId, inserted.id);
             panelNameToId.set(`${sellerEmail}|${panel.name}`, inserted.id);
             count++;
           }
@@ -951,12 +929,11 @@ serve(async (req) => {
           let clientId = null;
           let panelId = null;
 
-          if (isV1Format && !isV3Format && !isV2Format) {
-            if (pc.client_id) clientId = clientIdMap.get(pc.client_id);
-            if (pc.panel_id) panelId = panelIdMap.get(pc.panel_id);
-          } else {
-            if (pc._client_identifier) clientId = clientIdentifierToId.get(`${sellerEmail}|${pc._client_identifier}`);
-            if (pc._panel_name) panelId = panelNameToId.get(`${sellerEmail}|${pc._panel_name}`);
+          if (pc._client_identifier) {
+            clientId = clientIdentifierToId.get(`${sellerEmail}|${pc._client_identifier}`);
+          }
+          if (pc._panel_name) {
+            panelId = panelNameToId.get(`${sellerEmail}|${pc._panel_name}`);
           }
 
           if (!clientId || !panelId) { processedItems++; continue; }
@@ -967,7 +944,8 @@ serve(async (req) => {
               seller_id: sellerId,
               client_id: clientId,
               panel_id: panelId,
-              slot_type: pc.slot_type || 'unified',
+              slot_type: pc.slot_type || 'iptv',
+              assigned_at: pc.assigned_at,
             });
 
           if (!error) count++;
@@ -979,7 +957,7 @@ serve(async (req) => {
     }
 
     // ----------------------------------------
-    // 11. MESSAGE_HISTORY (batch)
+    // 11. MESSAGE_HISTORY
     // ----------------------------------------
     if (shouldImport('message_history')) {
       const tableData = backup.data.message_history || [];
@@ -999,12 +977,11 @@ serve(async (req) => {
           let clientId = null;
           let templateId = null;
 
-          if (isV1Format && !isV3Format && !isV2Format) {
-            if (msg.client_id) clientId = clientIdMap.get(msg.client_id);
-            if (msg.template_id) templateId = templateIdMap.get(msg.template_id);
-          } else {
-            if (msg._client_identifier) clientId = clientIdentifierToId.get(`${sellerEmail}|${msg._client_identifier}`);
-            if (msg._template_name) templateId = templateNameToId.get(`${sellerEmail}|${msg._template_name}`);
+          if (msg._client_identifier) {
+            clientId = clientIdentifierToId.get(`${sellerEmail}|${msg._client_identifier}`);
+          }
+          if (msg._template_name) {
+            templateId = templateNameToId.get(`${sellerEmail}|${msg._template_name}`);
           }
 
           if (!clientId) { skipped++; processedItems++; continue; }
@@ -1082,8 +1059,6 @@ serve(async (req) => {
           const sellerId = getImportSellerId(app);
           if (!sellerId) { processedItems++; continue; }
 
-          const oldId = app.id;
-
           const { data: inserted, error } = await supabase
             .from('external_apps')
             .insert({
@@ -1100,7 +1075,6 @@ serve(async (req) => {
             .single();
 
           if (!error && inserted) {
-            if (oldId) extAppIdMap.set(oldId, inserted.id);
             extAppNameToId.set(`${sellerEmail}|${app.name}`, inserted.id);
             count++;
           }
@@ -1129,12 +1103,11 @@ serve(async (req) => {
           let clientId = null;
           let extAppId = null;
 
-          if (isV1Format && !isV3Format && !isV2Format) {
-            if (app.client_id) clientId = clientIdMap.get(app.client_id);
-            if (app.external_app_id) extAppId = extAppIdMap.get(app.external_app_id);
-          } else {
-            if (app._client_identifier) clientId = clientIdentifierToId.get(`${sellerEmail}|${app._client_identifier}`);
-            if (app._app_name) extAppId = extAppNameToId.get(`${sellerEmail}|${app._app_name}`);
+          if (app._client_identifier) {
+            clientId = clientIdentifierToId.get(`${sellerEmail}|${app._client_identifier}`);
+          }
+          if (app._app_name) {
+            extAppId = extAppNameToId.get(`${sellerEmail}|${app._app_name}`);
           }
 
           if (!clientId || !extAppId) { processedItems++; continue; }
@@ -1177,10 +1150,8 @@ serve(async (req) => {
 
           let clientId = null;
 
-          if (isV1Format && !isV3Format && !isV2Format) {
-            if (acc.client_id) clientId = clientIdMap.get(acc.client_id);
-          } else {
-            if (acc._client_identifier) clientId = clientIdentifierToId.get(`${sellerEmail}|${acc._client_identifier}`);
+          if (acc._client_identifier) {
+            clientId = clientIdentifierToId.get(`${sellerEmail}|${acc._client_identifier}`);
           }
 
           if (!clientId) { processedItems++; continue; }
@@ -1345,10 +1316,8 @@ serve(async (req) => {
           if (!sellerId) { processedItems++; continue; }
 
           let serverId = null;
-          if (isV1Format && !isV3Format && !isV2Format) {
-            if (app.server_id) serverId = serverIdMap.get(app.server_id);
-          } else {
-            if (app._server_name) serverId = serverNameToId.get(`${sellerEmail}|${app._server_name}`);
+          if (app._server_name) {
+            serverId = serverNameToId.get(`${sellerEmail}|${app._server_name}`);
           }
 
           if (!serverId) { processedItems++; continue; }
@@ -1401,13 +1370,11 @@ serve(async (req) => {
         .eq('id', jobId);
     }
 
-    const detectedFormat = isV3Format ? 'v3 (clean-logical-keys)' : isV2Format ? 'v2 (seller_email)' : 'v1 (seller_id)';
-
     return new Response(
       JSON.stringify({
         success: true,
         message: 'Restore concluído com sucesso',
-        format: detectedFormat,
+        format: 'v3 (clean-logical-keys)',
         restored: results.restored,
         skipped: results.skipped,
         errors: results.errors,
