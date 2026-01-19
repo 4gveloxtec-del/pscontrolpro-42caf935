@@ -157,27 +157,50 @@ serve(async (req) => {
           continue;
         }
 
-        // Check if user already exists in auth.users (by email)
-        const { data: existingUsers } = await supabase.auth.admin.listUsers();
-        const existingUser = existingUsers?.users?.find(u => u.email?.toLowerCase() === email);
+        // Check if user already exists in auth.users (by email) - listUsers with filter
+        const { data: existingUsersData } = await supabase.auth.admin.listUsers({ 
+          page: 1, 
+          perPage: 1,
+        });
+        // Search manually since API doesn't support email filter directly
+        const allUsersForEmail = existingUsersData?.users || [];
+        const existingUser = allUsersForEmail.find(u => u.email?.toLowerCase() === email);
+        
+        // If not found in first page, try direct lookup via profile
+        let foundUser = existingUser;
+        if (!foundUser) {
+          const { data: profileCheck } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('email', email)
+            .single();
+          
+          if (profileCheck) {
+            // Profile exists, get the auth user
+            const { data: authUser } = await supabase.auth.admin.getUserById(profileCheck.id);
+            if (authUser?.user) {
+              foundUser = authUser.user;
+            }
+          }
+        }
 
-        if (existingUser) {
+        if (foundUser) {
           // User exists, map old ID to existing user ID
-          sellerIdMapping.set(oldId, existingUser.id);
+          sellerIdMapping.set(oldId, foundUser.id);
           report.skipped.profiles = (report.skipped.profiles || 0) + 1;
-          console.log(`[Profile] ${email} already exists in auth, mapping ${oldId} -> ${existingUser.id}`);
+          console.log(`[Profile] ${email} already exists in auth, mapping ${oldId} -> ${foundUser.id}`);
           
           // Ensure profile exists for this user
           const { data: existingProfile } = await supabase
             .from('profiles')
             .select('id')
-            .eq('id', existingUser.id)
+            .eq('id', foundUser.id)
             .single();
           
           if (!existingProfile) {
             // Create profile for existing auth user
             await supabase.from('profiles').insert({
-              id: existingUser.id,
+              id: foundUser.id,
               email: email,
               full_name: profile.full_name,
               whatsapp: profile.whatsapp,
@@ -191,6 +214,23 @@ serve(async (req) => {
               notification_days_before: profile.notification_days_before ?? 3,
             });
           }
+
+          // IMPORTANT: Ensure user has seller role
+          const { data: existingRole } = await supabase
+            .from('user_roles')
+            .select('id')
+            .eq('user_id', foundUser.id)
+            .eq('role', 'seller')
+            .single();
+          
+          if (!existingRole) {
+            await supabase.from('user_roles').upsert({
+              user_id: foundUser.id,
+              role: 'seller',
+            }, { onConflict: 'user_id,role' });
+            console.log(`[Profile] Added seller role for existing user ${email}`);
+          }
+          
           continue;
         }
 
