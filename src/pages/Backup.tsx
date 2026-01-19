@@ -220,6 +220,31 @@ export default function Backup() {
     await executeRestore();
   };
 
+  // Normaliza respostas do backend (algumas versões retornam { report: { imported } } ao invés de { restored })
+  const normalizeRestoreResult = (data: any): {
+    restored: Record<string, number>;
+    errors: string[];
+    warnings?: string[];
+  } | null => {
+    if (!data || typeof data !== 'object') return null;
+
+    const restoredFromReport = data?.report?.imported;
+    const restored = (data?.restored ?? restoredFromReport ?? {}) as Record<string, number>;
+
+    const errorsFromReport = Array.isArray(data?.report?.errorDetails)
+      ? data.report.errorDetails.map((e: any) => `[${e?.table || 'unknown'}] ${e?.reason || 'Erro'}`)
+      : [];
+
+    const errors = (Array.isArray(data?.errors) ? data.errors : errorsFromReport) as string[];
+    const warnings = (Array.isArray(data?.warnings)
+      ? data.warnings
+      : Array.isArray(data?.report?.warnings)
+        ? data.report.warnings
+        : []) as string[];
+
+    return { restored, errors, warnings };
+  };
+
   const executeRestore = async () => {
     if (!backupFile || !user) return;
 
@@ -265,32 +290,36 @@ export default function Backup() {
       if (!token) throw new Error('Sessão inválida. Faça login novamente.');
 
       // Start the import in background - don't wait for completion
-      supabase.functions.invoke('complete-backup-import', {
-        body: {
-          backup: backupFile,
-          mode: restoreMode,
-          modules: modulesForBackend,
-          jobId: job.id,
-        },
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }).then(({ data, error }) => {
-        if (error) {
-          console.error('[Backup] complete-backup-import error:', error);
-          // Error will be shown via the floating notification
-        } else if (data) {
-          setRestoreResult(data);
-        }
-      }).catch((err) => {
-        console.error('[Backup] Unexpected error:', err);
-      });
+      supabase.functions
+        .invoke('complete-backup-import', {
+          body: {
+            backup: backupFile,
+            mode: restoreMode,
+            modules: modulesForBackend,
+            jobId: job.id,
+          },
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('[Backup] complete-backup-import error:', error);
+            // Error will be shown via the floating notification
+            return;
+          }
+
+          const normalized = normalizeRestoreResult(data);
+          if (normalized) setRestoreResult(normalized);
+        })
+        .catch((err) => {
+          console.error('[Backup] Unexpected error:', err);
+        });
 
       // Close dialog immediately - progress will be tracked via floating notification
       toast.info('Importação iniciada! Você pode acompanhar o progresso na notificação flutuante.');
       setRestoreDialogOpen(false);
       setBackupFile(null);
-      
     } catch (error) {
       console.error('Erro ao iniciar restauração:', error);
       toast.error((error as { message?: string })?.message || 'Erro ao iniciar backup');
@@ -300,7 +329,7 @@ export default function Backup() {
   };
 
   const handleFloatingComplete = (result: { restored: Record<string, number>; errors: string[] }) => {
-    setRestoreResult(result);
+    setRestoreResult({ restored: result.restored || {}, errors: result.errors || [], warnings: [] });
   };
 
   const handleFloatingClose = () => {
@@ -652,11 +681,11 @@ export default function Backup() {
                   <span className="text-sm font-medium">Importação concluída!</span>
                 </div>
 
-                {Object.keys(restoreResult.restored).length > 0 && (
+                {Object.keys(restoreResult.restored || {}).length > 0 && (
                   <div className="p-3 bg-muted rounded-lg text-sm">
                     <strong>Itens importados:</strong>
                     <div className="grid grid-cols-2 gap-1 mt-2">
-                      {Object.entries(restoreResult.restored).map(([key, value]) => {
+                      {Object.entries(restoreResult.restored || {}).map(([key, value]) => {
                         const module = moduleConfig.find(m => m.key === key);
                         return (
                           <div key={key} className="flex items-center justify-between">
