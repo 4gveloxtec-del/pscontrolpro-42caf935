@@ -29,3 +29,9 @@ verify_jwt = false
 
 [functions.connection-heartbeat]
 verify_jwt = false
+
+[functions.complete-backup-export]
+verify_jwt = true
+
+[functions.complete-backup-import]
+verify_jwt = true

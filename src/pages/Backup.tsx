@@ -1,12 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { Navigate } from 'react-router-dom';
-import { supabaseExternal as supabase } from '@/lib/supabase-external';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -16,113 +19,101 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { Database, Download, Upload, AlertTriangle, CheckCircle, Rocket, Settings2 } from 'lucide-react';
-import { ImportClientsFromProject } from '@/components/ImportClientsFromProject';
+import { 
+  Database, 
+  Download, 
+  Upload, 
+  AlertTriangle, 
+  CheckCircle, 
+  Rocket,
+  FileJson,
+  Trash2,
+  Shield,
+  Users,
+  Server,
+  CreditCard,
+  MessageSquare,
+  Ticket,
+  Receipt,
+  UserPlus,
+  History,
+  Package,
+  FolderOpen
+} from 'lucide-react';
 
-interface BackupData {
+interface CleanBackupData {
   version: string;
-  timestamp: string;
-  user: { id: string; email: string };
+  type: string;
+  exported_at: string;
+  exported_by: string;
   stats: Record<string, number>;
   data: {
-    plans?: unknown[];
-    servers?: unknown[];
-    clients?: unknown[];
-    whatsapp_templates?: unknown[];
-    coupons?: unknown[];
-    bills_to_pay?: unknown[];
-    referrals?: unknown[];
-    shared_panels?: unknown[];
-    panel_clients?: unknown[];
-    message_history?: unknown[];
-    profiles?: unknown[];
-    client_categories?: unknown[];
+    profiles?: any[];
+    clients?: any[];
+    servers?: any[];
+    plans?: any[];
+    external_apps?: any[];
+    client_external_apps?: any[];
+    whatsapp_templates?: any[];
+    shared_panels?: any[];
+    panel_clients?: any[];
+    bills_to_pay?: any[];
+    coupons?: any[];
+    client_categories?: any[];
+    custom_products?: any[];
+    referrals?: any[];
+    message_history?: any[];
+    monthly_profits?: any[];
+    server_apps?: any[];
+    client_premium_accounts?: any[];
+    app_settings?: any[];
   };
 }
+
+const moduleConfig = [
+  { key: 'profiles', label: 'Vendedores', icon: Users, description: 'Perfis de vendedores (exceto admin)' },
+  { key: 'clients', label: 'Clientes', icon: Users, description: 'Todos os clientes' },
+  { key: 'servers', label: 'Servidores', icon: Server, description: 'Servidores e configurações' },
+  { key: 'plans', label: 'Planos', icon: CreditCard, description: 'Planos de assinatura' },
+  { key: 'external_apps', label: 'Apps Externos', icon: Package, description: 'Aplicativos externos' },
+  { key: 'client_external_apps', label: 'Apps de Clientes', icon: Package, description: 'Apps vinculados a clientes' },
+  { key: 'whatsapp_templates', label: 'Templates WhatsApp', icon: MessageSquare, description: 'Modelos de mensagens' },
+  { key: 'shared_panels', label: 'Painéis Compartilhados', icon: Server, description: 'Painéis de revenda' },
+  { key: 'panel_clients', label: 'Clientes de Painel', icon: Users, description: 'Clientes nos painéis' },
+  { key: 'bills_to_pay', label: 'Contas a Pagar', icon: Receipt, description: 'Registro de contas' },
+  { key: 'coupons', label: 'Cupons', icon: Ticket, description: 'Cupons de desconto' },
+  { key: 'client_categories', label: 'Categorias', icon: FolderOpen, description: 'Categorias de clientes' },
+  { key: 'custom_products', label: 'Produtos Personalizados', icon: Package, description: 'Produtos customizados' },
+  { key: 'referrals', label: 'Indicações', icon: UserPlus, description: 'Sistema de indicações' },
+  { key: 'message_history', label: 'Histórico de Mensagens', icon: History, description: 'Pode ser muito grande!' },
+  { key: 'monthly_profits', label: 'Lucros Mensais', icon: CreditCard, description: 'Histórico de lucros' },
+  { key: 'server_apps', label: 'Apps de Servidor', icon: Package, description: 'Apps por servidor' },
+  { key: 'client_premium_accounts', label: 'Contas Premium', icon: CreditCard, description: 'Contas premium de clientes' },
+];
 
 export default function Backup() {
   const { user, isAdmin } = useAuth();
   const [isExporting, setIsExporting] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
-  const [isDeployExporting, setIsDeployExporting] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
-  const [deployDialogOpen, setDeployDialogOpen] = useState(false);
+  const [confirmCleanDialogOpen, setConfirmCleanDialogOpen] = useState(false);
   const [restoreMode, setRestoreMode] = useState<'append' | 'replace'>('append');
-  const [backupFile, setBackupFile] = useState<BackupData | null>(null);
-  const [restoreResult, setRestoreResult] = useState<{ restored: Record<string, number>; errors: string[] } | null>(null);
-  const [deployEnabled, setDeployEnabled] = useState(false);
-  const [isLoadingDeployStatus, setIsLoadingDeployStatus] = useState(true);
-  const [deployOptions, setDeployOptions] = useState({
-    includeProfiles: true,
-    includeClients: true,
-    includePlans: true,
-    includeServers: true,
-    includeTemplates: true,
-    includeCoupons: true,
-    includeBills: true,
-    includeReferrals: true,
-    includePanels: true,
-    includeCategories: true,
-    includeMessageHistory: false,
-  });
+  const [backupFile, setBackupFile] = useState<CleanBackupData | null>(null);
+  const [restoreResult, setRestoreResult] = useState<{ 
+    restored: Record<string, number>; 
+    errors: string[];
+    warnings?: string[];
+  } | null>(null);
+  const [selectedModules, setSelectedModules] = useState<string[]>(
+    moduleConfig.map(m => m.key)
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Load deploy enabled status
-  useEffect(() => {
-    const loadDeployStatus = async () => {
-      try {
-        const { data } = await supabase
-          .from('app_settings')
-          .select('value')
-          .eq('key', 'deploy_enabled')
-          .maybeSingle();
-        
-        setDeployEnabled(data?.value === 'true');
-      } catch (error) {
-        console.error('Error loading deploy status:', error);
-      } finally {
-        setIsLoadingDeployStatus(false);
-      }
-    };
-    loadDeployStatus();
-  }, []);
-
-  const toggleDeployEnabled = async (enabled: boolean) => {
-    try {
-      const { data: existing } = await supabase
-        .from('app_settings')
-        .select('id')
-        .eq('key', 'deploy_enabled')
-        .maybeSingle();
-
-      if (existing) {
-        await supabase
-          .from('app_settings')
-          .update({ value: enabled ? 'true' : 'false' })
-          .eq('key', 'deploy_enabled');
-      } else {
-        await supabase
-          .from('app_settings')
-          .insert({ 
-            key: 'deploy_enabled', 
-            value: enabled ? 'true' : 'false',
-            description: 'Habilita a opção de deploy para outro projeto'
-          });
-      }
-      
-      setDeployEnabled(enabled);
-      toast.success(enabled ? 'Deploy ativado!' : 'Deploy desativado!');
-    } catch (error) {
-      console.error('Error toggling deploy:', error);
-      toast.error('Erro ao alterar configuração');
-    }
-  };
 
   if (!isAdmin) {
     return <Navigate to="/dashboard" replace />;
   }
 
-  const handleExport = async () => {
+  const handleExportCleanBackup = async () => {
     setIsExporting(true);
     try {
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -130,7 +121,7 @@ export default function Backup() {
       const token = sessionData.session?.access_token;
       if (!token) throw new Error('Sessão inválida. Faça login novamente.');
 
-      const { data, error } = await supabase.functions.invoke('backup-data', {
+      const { data, error } = await supabase.functions.invoke('complete-backup-export', {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -142,13 +133,13 @@ export default function Backup() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `backup-completo-${new Date().toISOString().split('T')[0]}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast.success('Backup exportado com sucesso!');
+      toast.success('Backup completo exportado com sucesso!');
     } catch (error) {
       console.error('Erro ao exportar:', error);
       toast.error((error as { message?: string })?.message || 'Erro ao exportar backup');
@@ -164,19 +155,19 @@ export default function Backup() {
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
-        const data = JSON.parse(event.target?.result as string) as BackupData;
-        if (!data.version || !data.data) {
-          throw new Error('Formato de backup inválido');
+        const data = JSON.parse(event.target?.result as string) as CleanBackupData;
+        if (!data.version || !data.data || data.type !== 'complete_clean_backup') {
+          throw new Error('Formato de backup inválido. Use um backup do tipo "complete_clean_backup".');
         }
         setBackupFile(data);
+        setSelectedModules(Object.keys(data.data).filter(k => data.data[k as keyof typeof data.data]?.length > 0));
         setRestoreDialogOpen(true);
       } catch (err) {
-        toast.error('Arquivo de backup inválido');
+        toast.error((err as Error).message || 'Arquivo de backup inválido');
       }
     };
     reader.readAsText(file);
     
-    // Reset input for re-selection
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -185,6 +176,18 @@ export default function Backup() {
   const handleRestore = async () => {
     if (!backupFile) return;
 
+    if (restoreMode === 'replace') {
+      setConfirmCleanDialogOpen(true);
+      return;
+    }
+
+    await executeRestore();
+  };
+
+  const executeRestore = async () => {
+    if (!backupFile) return;
+
+    setConfirmCleanDialogOpen(false);
     setIsRestoring(true);
     setRestoreResult(null);
 
@@ -194,8 +197,12 @@ export default function Backup() {
       const token = sessionData.session?.access_token;
       if (!token) throw new Error('Sessão inválida. Faça login novamente.');
 
-      const { data, error } = await supabase.functions.invoke('restore-data', {
-        body: { backup: backupFile, mode: restoreMode },
+      const { data, error } = await supabase.functions.invoke('complete-backup-import', {
+        body: { 
+          backup: backupFile, 
+          mode: restoreMode,
+          modules: selectedModules
+        },
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -205,7 +212,7 @@ export default function Backup() {
 
       setRestoreResult(data);
 
-      const totalRestored = Object.values(data.restored).reduce((a: number, b: unknown) => a + (b as number), 0);
+      const totalRestored = Object.values(data.restored || {}).reduce((a: number, b: unknown) => a + (b as number), 0);
 
       if (data.errors?.length > 0) {
         toast.warning(`Backup restaurado parcialmente: ${totalRestored} itens. ${data.errors.length} erros.`);
@@ -224,190 +231,132 @@ export default function Backup() {
     setRestoreDialogOpen(false);
     setBackupFile(null);
     setRestoreResult(null);
+    setSelectedModules(moduleConfig.map(m => m.key));
   };
 
-  const handleDeployExport = async () => {
-    setIsDeployExporting(true);
-    try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) throw sessionError;
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error('Sessão inválida. Faça login novamente.');
+  const toggleModule = (key: string) => {
+    setSelectedModules(prev => 
+      prev.includes(key) 
+        ? prev.filter(k => k !== key)
+        : [...prev, key]
+    );
+  };
 
-      // Fetch all data based on options - for ALL users (admin export)
-      const fetchPromises = [];
-      const dataKeys: string[] = [];
+  const selectAllModules = () => {
+    const available = Object.keys(backupFile?.data || {}).filter(
+      k => (backupFile?.data[k as keyof typeof backupFile.data] as any)?.length > 0
+    );
+    setSelectedModules(available);
+  };
 
-      if (deployOptions.includeProfiles) {
-        fetchPromises.push(supabase.from('profiles').select('*'));
-        dataKeys.push('profiles');
-      }
-      if (deployOptions.includeClients) {
-        fetchPromises.push(supabase.from('clients').select('*'));
-        dataKeys.push('clients');
-      }
-      if (deployOptions.includePlans) {
-        fetchPromises.push(supabase.from('plans').select('*'));
-        dataKeys.push('plans');
-      }
-      if (deployOptions.includeServers) {
-        fetchPromises.push(supabase.from('servers').select('*'));
-        dataKeys.push('servers');
-      }
-      if (deployOptions.includeTemplates) {
-        fetchPromises.push(supabase.from('whatsapp_templates').select('*'));
-        dataKeys.push('whatsapp_templates');
-      }
-      if (deployOptions.includeCoupons) {
-        fetchPromises.push(supabase.from('coupons').select('*'));
-        dataKeys.push('coupons');
-      }
-      if (deployOptions.includeBills) {
-        fetchPromises.push(supabase.from('bills_to_pay').select('*'));
-        dataKeys.push('bills_to_pay');
-      }
-      if (deployOptions.includeReferrals) {
-        fetchPromises.push(supabase.from('referrals').select('*'));
-        dataKeys.push('referrals');
-      }
-      if (deployOptions.includePanels) {
-        fetchPromises.push(supabase.from('shared_panels').select('*'));
-        fetchPromises.push(supabase.from('panel_clients').select('*'));
-        dataKeys.push('shared_panels');
-        dataKeys.push('panel_clients');
-      }
-      if (deployOptions.includeCategories) {
-        fetchPromises.push(supabase.from('client_categories').select('*'));
-        dataKeys.push('client_categories');
-      }
-      if (deployOptions.includeMessageHistory) {
-        fetchPromises.push(supabase.from('message_history').select('*'));
-        dataKeys.push('message_history');
-      }
-
-      const results = await Promise.all(fetchPromises);
-
-      const exportData: Record<string, unknown[]> = {};
-      const stats: Record<string, number> = {};
-
-      results.forEach((result, index) => {
-        const key = dataKeys[index];
-        exportData[key] = result.data || [];
-        stats[key] = (result.data || []).length;
-      });
-
-      const deployBackup = {
-        version: '2.0-deploy',
-        timestamp: new Date().toISOString(),
-        exportType: 'full-deploy',
-        description: 'Backup completo para deploy em outro projeto',
-        stats,
-        data: exportData,
-      };
-
-      const blob = new Blob([JSON.stringify(deployBackup, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `deploy-backup-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      setDeployDialogOpen(false);
-      toast.success('Backup para deploy exportado com sucesso!');
-    } catch (error) {
-      console.error('Erro ao exportar para deploy:', error);
-      toast.error((error as { message?: string })?.message || 'Erro ao exportar backup');
-    } finally {
-      setIsDeployExporting(false);
-    }
+  const deselectAllModules = () => {
+    setSelectedModules([]);
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Backup e Restauração</h1>
-        <p className="text-muted-foreground">Exporte e importe dados do sistema</p>
+        <h1 className="text-3xl font-bold tracking-tight">Backup Limpo Completo</h1>
+        <p className="text-muted-foreground">Sistema de backup para migração entre projetos (Admin)</p>
       </div>
 
-      {/* Deploy Settings Card */}
-      <Card className={deployEnabled ? "border-primary/50 bg-primary/5" : "border-muted"}>
+      {/* Main Backup Card */}
+      <Card className="border-primary/50 bg-gradient-to-br from-primary/5 to-primary/10">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className={`flex items-center gap-2 ${deployEnabled ? 'text-primary' : ''}`}>
-                <Rocket className="h-5 w-5" />
-                Deploy para Outro Projeto
-              </CardTitle>
-              <CardDescription>
-                Exporte todos os dados para migrar para outro projeto
-              </CardDescription>
+          <CardTitle className="flex items-center gap-2 text-primary">
+            <Shield className="h-6 w-6" />
+            Backup Completo para Deploy
+          </CardTitle>
+          <CardDescription>
+            Exporta todos os dados sem IDs internos, usando chaves lógicas (emails, nomes) para relacionamentos
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="p-4 bg-background/50 rounded-lg border">
+              <h3 className="font-semibold flex items-center gap-2 mb-2">
+                <FileJson className="h-4 w-4 text-primary" />
+                Exportação Limpa
+              </h3>
+              <ul className="text-sm text-muted-foreground space-y-1">
+                <li>• Sem UUIDs internos do banco</li>
+                <li>• Relacionamentos via email/nome</li>
+                <li>• Datas em formato ISO 8601</li>
+                <li>• Pronto para importar em outro projeto</li>
+              </ul>
             </div>
-            <div className="flex items-center gap-2">
-              <Label htmlFor="deploy-toggle" className="text-sm text-muted-foreground">
-                {deployEnabled ? 'Ativo' : 'Desativado'}
-              </Label>
-              <Switch
-                id="deploy-toggle"
-                checked={deployEnabled}
-                onCheckedChange={toggleDeployEnabled}
-                disabled={isLoadingDeployStatus}
-              />
+            <div className="p-4 bg-background/50 rounded-lg border">
+              <h3 className="font-semibold flex items-center gap-2 mb-2">
+                <Database className="h-4 w-4 text-primary" />
+                Importação Inteligente
+              </h3>
+              <ul className="text-sm text-muted-foreground space-y-1">
+                <li>• Cria novos UUIDs automaticamente</li>
+                <li>• Mapeia relacionamentos por chaves</li>
+                <li>• Modo adicionar ou substituir</li>
+                <li>• Preserva o admin atual</li>
+              </ul>
             </div>
           </div>
-        </CardHeader>
-        {deployEnabled && (
-          <CardContent className="space-y-4">
+
+          <div className="flex items-start gap-2 p-3 bg-warning/10 rounded-lg border border-warning/30">
+            <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
             <p className="text-sm text-muted-foreground">
-              Gera um backup completo com todos os dados de todos os vendedores, pronto para importar em outro projeto via GitHub/Lovable.
+              <strong>Importante:</strong> Este backup exclui automaticamente o admin atual. 
+              Ao importar em outro projeto, apenas os vendedores e seus dados serão restaurados.
             </p>
-            <Button onClick={() => setDeployDialogOpen(true)} className="w-full">
-              <Rocket className="h-4 w-4 mr-2" />
-              Configurar Deploy
-            </Button>
-          </CardContent>
-        )}
+          </div>
+        </CardContent>
       </Card>
 
       <div className="grid gap-6 md:grid-cols-2">
+        {/* Export Card */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Download className="h-5 w-5" />
-              Exportar Backup
+              <Download className="h-5 w-5 text-primary" />
+              Exportar Backup Completo
             </CardTitle>
             <CardDescription>
-              Baixe todos os seus dados em formato JSON
+              Baixe todos os dados em formato JSON limpo
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              O backup inclui todos os clientes, servidores, planos, templates, cupons, contas a pagar, indicações e painéis.
-            </p>
-            <Button onClick={handleExport} disabled={isExporting} className="w-full">
+            <div className="text-sm text-muted-foreground space-y-2">
+              <p>O backup inclui:</p>
+              <div className="grid grid-cols-2 gap-1 text-xs">
+                {moduleConfig.slice(0, 10).map(m => (
+                  <div key={m.key} className="flex items-center gap-1">
+                    <m.icon className="h-3 w-3" />
+                    <span>{m.label}</span>
+                  </div>
+                ))}
+                <span className="text-muted-foreground">+ mais...</span>
+              </div>
+            </div>
+            <Button onClick={handleExportCleanBackup} disabled={isExporting} className="w-full">
               <Download className="h-4 w-4 mr-2" />
-              {isExporting ? 'Exportando...' : 'Exportar Backup'}
+              {isExporting ? 'Exportando...' : 'Exportar Backup Completo'}
             </Button>
           </CardContent>
         </Card>
 
+        {/* Import Card */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5" />
-              Restaurar Backup
+              <Upload className="h-5 w-5 text-primary" />
+              Importar Backup
             </CardTitle>
             <CardDescription>
-              Importe dados de um arquivo de backup
+              Restaure dados de um arquivo de backup limpo
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-start gap-2 p-3 bg-warning/10 rounded-lg">
-              <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
+            <div className="flex items-start gap-2 p-3 bg-destructive/10 rounded-lg border border-destructive/30">
+              <Trash2 className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
               <p className="text-sm text-muted-foreground">
-                A restauração importa dados do backup. Recomendamos fazer um backup antes de restaurar.
+                <strong>Modo Substituir:</strong> Limpa todos os dados existentes (exceto admin) antes de importar.
               </p>
             </div>
             <input
@@ -429,74 +378,150 @@ export default function Backup() {
         </Card>
       </div>
 
-      {/* Import Clients from Project - Admin only */}
-      <ImportClientsFromProject />
-
+      {/* Database Info */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
-            Informações do Banco de Dados
+            Tabelas Suportadas
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground">
-            O sistema utiliza Lovable Cloud como backend, garantindo segurança e escalabilidade para seus dados.
-          </p>
+          <div className="flex flex-wrap gap-2">
+            {moduleConfig.map(m => (
+              <Badge key={m.key} variant="secondary" className="flex items-center gap-1">
+                <m.icon className="h-3 w-3" />
+                {m.label}
+              </Badge>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
       {/* Restore Dialog */}
       <Dialog open={restoreDialogOpen} onOpenChange={setRestoreDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Restaurar Backup</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5 text-primary" />
+              Importar Backup Completo
+            </DialogTitle>
             <DialogDescription>
-              {restoreResult ? 'Resultado da restauração' : 'Escolha como deseja restaurar os dados'}
+              {restoreResult ? 'Resultado da importação' : 'Configure a importação dos dados'}
             </DialogDescription>
           </DialogHeader>
 
           {!restoreResult ? (
             <>
               {backupFile && (
-                <div className="space-y-4">
-                  <div className="p-3 bg-muted rounded-lg text-sm space-y-1">
-                    <p><strong>Versão:</strong> {backupFile.version}</p>
-                    <p><strong>Data:</strong> {new Date(backupFile.timestamp).toLocaleString('pt-BR')}</p>
-                    {backupFile.stats && (
-                      <div className="pt-2">
-                        <strong>Itens no backup:</strong>
-                        <ul className="list-disc list-inside ml-2 text-muted-foreground">
-                          {Object.entries(backupFile.stats).map(([key, value]) => (
-                            <li key={key}>{key}: {value}</li>
-                          ))}
-                        </ul>
+                <div className="flex-1 overflow-hidden flex flex-col space-y-4">
+                  {/* Backup Info */}
+                  <div className="p-3 bg-muted rounded-lg text-sm">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-muted-foreground">Versão:</span>
+                        <span className="ml-2 font-medium">{backupFile.version}</span>
                       </div>
-                    )}
+                      <div>
+                        <span className="text-muted-foreground">Tipo:</span>
+                        <Badge variant="outline" className="ml-2">{backupFile.type}</Badge>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Data:</span>
+                        <span className="ml-2">{new Date(backupFile.exported_at).toLocaleString('pt-BR')}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Por:</span>
+                        <span className="ml-2">{backupFile.exported_by}</span>
+                      </div>
+                    </div>
                   </div>
 
+                  {/* Mode Selection */}
                   <div className="space-y-3">
-                    <Label>Modo de restauração:</Label>
+                    <Label className="font-semibold">Modo de importação:</Label>
                     <RadioGroup value={restoreMode} onValueChange={(v) => setRestoreMode(v as 'append' | 'replace')}>
                       <div className="flex items-start gap-3 p-3 border rounded-lg">
                         <RadioGroupItem value="append" id="append" className="mt-1" />
                         <div>
-                          <Label htmlFor="append" className="font-medium">Adicionar</Label>
+                          <Label htmlFor="append" className="font-medium cursor-pointer">Adicionar</Label>
                           <p className="text-sm text-muted-foreground">
                             Adiciona os dados do backup aos dados existentes
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-start gap-3 p-3 border border-destructive/50 rounded-lg">
+                      <div className="flex items-start gap-3 p-3 border border-destructive/50 rounded-lg bg-destructive/5">
                         <RadioGroupItem value="replace" id="replace" className="mt-1" />
                         <div>
-                          <Label htmlFor="replace" className="font-medium text-destructive">Substituir</Label>
+                          <Label htmlFor="replace" className="font-medium text-destructive cursor-pointer">
+                            Substituir (Limpar Tudo)
+                          </Label>
                           <p className="text-sm text-muted-foreground">
-                            Remove todos os dados existentes e importa apenas o backup
+                            Remove todos os dados existentes (exceto admin) e importa apenas o backup
                           </p>
                         </div>
                       </div>
                     </RadioGroup>
+                  </div>
+
+                  {/* Module Selection */}
+                  <div className="space-y-3 flex-1 overflow-hidden flex flex-col">
+                    <div className="flex items-center justify-between">
+                      <Label className="font-semibold">Módulos a importar:</Label>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={selectAllModules}>
+                          Todos
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={deselectAllModules}>
+                          Nenhum
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    <ScrollArea className="flex-1 max-h-[200px]">
+                      <div className="grid grid-cols-2 gap-2 pr-4">
+                        {moduleConfig.map(m => {
+                          const count = backupFile.stats?.[m.key] || 0;
+                          const hasData = count > 0;
+                          
+                          return (
+                            <div 
+                              key={m.key} 
+                              className={`flex items-center gap-2 p-2 border rounded-lg ${
+                                hasData ? '' : 'opacity-50'
+                              }`}
+                            >
+                              <Checkbox 
+                                id={m.key}
+                                checked={selectedModules.includes(m.key)}
+                                onCheckedChange={() => toggleModule(m.key)}
+                                disabled={!hasData}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <Label 
+                                  htmlFor={m.key} 
+                                  className="text-sm font-medium cursor-pointer flex items-center gap-1"
+                                >
+                                  <m.icon className="h-3 w-3" />
+                                  {m.label}
+                                </Label>
+                              </div>
+                              <Badge variant={hasData ? "default" : "secondary"} className="text-xs">
+                                {count}
+                              </Badge>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </ScrollArea>
+                  </div>
+
+                  {/* Summary */}
+                  <div className="p-3 bg-primary/10 rounded-lg text-sm">
+                    <strong>Resumo:</strong> {selectedModules.length} módulos selecionados, 
+                    {' '}{Object.entries(backupFile.stats || {})
+                      .filter(([k]) => selectedModules.includes(k))
+                      .reduce((sum, [, v]) => sum + (v as number), 0)} itens a importar
                   </div>
                 </div>
               )}
@@ -505,36 +530,72 @@ export default function Backup() {
                 <Button variant="outline" onClick={closeRestoreDialog}>
                   Cancelar
                 </Button>
-                <Button onClick={handleRestore} disabled={isRestoring}>
-                  {isRestoring ? 'Restaurando...' : 'Restaurar Backup'}
+                <Button 
+                  onClick={handleRestore} 
+                  disabled={isRestoring || selectedModules.length === 0}
+                  variant={restoreMode === 'replace' ? 'destructive' : 'default'}
+                >
+                  {isRestoring ? 'Importando...' : restoreMode === 'replace' ? 'Limpar e Importar' : 'Importar'}
                 </Button>
               </DialogFooter>
             </>
           ) : (
             <>
               <div className="space-y-4">
-                <div className="flex items-center gap-2 p-3 bg-success/10 rounded-lg">
+                <div className="flex items-center gap-2 p-3 bg-success/10 rounded-lg border border-success/30">
                   <CheckCircle className="h-5 w-5 text-success" />
-                  <span className="text-sm font-medium">Restauração concluída!</span>
+                  <span className="text-sm font-medium">Importação concluída!</span>
                 </div>
 
-                <div className="p-3 bg-muted rounded-lg text-sm">
-                  <strong>Itens restaurados:</strong>
-                  <ul className="list-disc list-inside ml-2 text-muted-foreground mt-1">
-                    {Object.entries(restoreResult.restored).map(([key, value]) => (
-                      <li key={key}>{key}: {value}</li>
-                    ))}
-                  </ul>
-                </div>
+                {Object.keys(restoreResult.restored).length > 0 && (
+                  <div className="p-3 bg-muted rounded-lg text-sm">
+                    <strong>Itens importados:</strong>
+                    <div className="grid grid-cols-2 gap-1 mt-2">
+                      {Object.entries(restoreResult.restored).map(([key, value]) => {
+                        const module = moduleConfig.find(m => m.key === key);
+                        return (
+                          <div key={key} className="flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              {module && <module.icon className="h-3 w-3" />}
+                              {module?.label || key}
+                            </span>
+                            <Badge variant="secondary">{value}</Badge>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {restoreResult.warnings && restoreResult.warnings.length > 0 && (
+                  <div className="p-3 bg-warning/10 rounded-lg text-sm border border-warning/30">
+                    <strong className="text-warning">Avisos ({restoreResult.warnings.length}):</strong>
+                    <ScrollArea className="max-h-24 mt-1">
+                      <ul className="list-disc list-inside text-muted-foreground">
+                        {restoreResult.warnings.slice(0, 10).map((w, i) => (
+                          <li key={i} className="text-xs">{w}</li>
+                        ))}
+                        {restoreResult.warnings.length > 10 && (
+                          <li className="text-xs">...e mais {restoreResult.warnings.length - 10}</li>
+                        )}
+                      </ul>
+                    </ScrollArea>
+                  </div>
+                )}
 
                 {restoreResult.errors?.length > 0 && (
-                  <div className="p-3 bg-destructive/10 rounded-lg text-sm">
+                  <div className="p-3 bg-destructive/10 rounded-lg text-sm border border-destructive/30">
                     <strong className="text-destructive">Erros ({restoreResult.errors.length}):</strong>
-                    <ul className="list-disc list-inside ml-2 text-muted-foreground mt-1 max-h-32 overflow-y-auto">
-                      {restoreResult.errors.map((err, i) => (
-                        <li key={i}>{err}</li>
-                      ))}
-                    </ul>
+                    <ScrollArea className="max-h-24 mt-1">
+                      <ul className="list-disc list-inside text-muted-foreground">
+                        {restoreResult.errors.slice(0, 10).map((err, i) => (
+                          <li key={i} className="text-xs">{err}</li>
+                        ))}
+                        {restoreResult.errors.length > 10 && (
+                          <li className="text-xs">...e mais {restoreResult.errors.length - 10}</li>
+                        )}
+                      </ul>
+                    </ScrollArea>
                   </div>
                 )}
               </div>
@@ -549,109 +610,43 @@ export default function Backup() {
         </DialogContent>
       </Dialog>
 
-      {/* Deploy Dialog */}
-      <Dialog open={deployDialogOpen} onOpenChange={setDeployDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      {/* Confirm Clean Dialog */}
+      <Dialog open={confirmCleanDialogOpen} onOpenChange={setConfirmCleanDialogOpen}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Rocket className="h-5 w-5 text-primary" />
-              Deploy para Outro Projeto
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-5 w-5" />
+              Confirmar Limpeza Total
             </DialogTitle>
             <DialogDescription>
-              Selecione quais dados exportar para migrar para outro projeto
+              Esta ação não pode ser desfeita!
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="p-3 bg-primary/10 rounded-lg text-sm">
-              <p className="text-muted-foreground">
-                Este backup inclui dados de <strong>todos os vendedores</strong> e pode ser importado em outro projeto usando a função "Restaurar Backup".
+            <div className="p-4 bg-destructive/10 rounded-lg border border-destructive/30">
+              <p className="text-sm">
+                Você está prestes a <strong className="text-destructive">APAGAR TODOS OS DADOS</strong> do sistema, 
+                incluindo todos os vendedores, clientes, servidores, planos, etc.
+              </p>
+              <p className="text-sm mt-2">
+                <strong>Apenas o admin atual será preservado.</strong>
               </p>
             </div>
 
-            <div className="space-y-3">
-              <Label className="text-base font-semibold">Dados a exportar:</Label>
-              
-              <div className="space-y-2">
-                {[
-                  { key: 'includeProfiles', label: 'Perfis de Vendedores', desc: 'Dados dos vendedores cadastrados' },
-                  { key: 'includeClients', label: 'Clientes', desc: 'Todos os clientes de todos os vendedores' },
-                  { key: 'includePlans', label: 'Planos', desc: 'Planos de assinatura configurados' },
-                  { key: 'includeServers', label: 'Servidores', desc: 'Servidores e configurações de crédito' },
-                  { key: 'includeTemplates', label: 'Templates WhatsApp', desc: 'Modelos de mensagens' },
-                  { key: 'includeCoupons', label: 'Cupons', desc: 'Cupons de desconto' },
-                  { key: 'includeBills', label: 'Contas a Pagar', desc: 'Registro de contas' },
-                  { key: 'includeReferrals', label: 'Indicações', desc: 'Sistema de indicações' },
-                  { key: 'includePanels', label: 'Painéis Compartilhados', desc: 'Painéis e clientes vinculados' },
-                  { key: 'includeCategories', label: 'Categorias', desc: 'Categorias de clientes' },
-                  { key: 'includeMessageHistory', label: 'Histórico de Mensagens', desc: 'Pode ser muito grande!' },
-                ].map(({ key, label, desc }) => (
-                  <div key={key} className="flex items-center justify-between p-2 border rounded-lg">
-                    <div>
-                      <Label htmlFor={key} className="font-medium cursor-pointer">{label}</Label>
-                      <p className="text-xs text-muted-foreground">{desc}</p>
-                    </div>
-                    <Switch
-                      id={key}
-                      checked={deployOptions[key as keyof typeof deployOptions]}
-                      onCheckedChange={(checked) => 
-                        setDeployOptions(prev => ({ ...prev, [key]: checked }))
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDeployOptions({
-                  includeProfiles: true,
-                  includeClients: true,
-                  includePlans: true,
-                  includeServers: true,
-                  includeTemplates: true,
-                  includeCoupons: true,
-                  includeBills: true,
-                  includeReferrals: true,
-                  includePanels: true,
-                  includeCategories: true,
-                  includeMessageHistory: true,
-                })}
-              >
-                Selecionar Todos
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDeployOptions({
-                  includeProfiles: false,
-                  includeClients: false,
-                  includePlans: false,
-                  includeServers: false,
-                  includeTemplates: false,
-                  includeCoupons: false,
-                  includeBills: false,
-                  includeReferrals: false,
-                  includePanels: false,
-                  includeCategories: false,
-                  includeMessageHistory: false,
-                })}
-              >
-                Desmarcar Todos
-              </Button>
+            <div className="p-3 bg-warning/10 rounded-lg border border-warning/30">
+              <p className="text-sm text-muted-foreground">
+                Após a limpeza, os dados do backup selecionado serão importados.
+              </p>
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeployDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setConfirmCleanDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={handleDeployExport} disabled={isDeployExporting}>
-              <Rocket className="h-4 w-4 mr-2" />
-              {isDeployExporting ? 'Exportando...' : 'Exportar para Deploy'}
+            <Button variant="destructive" onClick={executeRestore} disabled={isRestoring}>
+              {isRestoring ? 'Processando...' : 'Confirmar e Limpar Tudo'}
             </Button>
           </DialogFooter>
         </DialogContent>
