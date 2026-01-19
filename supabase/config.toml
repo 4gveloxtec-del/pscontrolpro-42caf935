@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.configure-seller-instance]
 verify_jwt = false
+
+[functions.connection-heartbeat]
+verify_jwt = false

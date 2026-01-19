@@ -925,6 +925,87 @@ export type Database = {
           },
         ]
       }
+      connection_alerts: {
+        Row: {
+          alert_type: string
+          created_at: string | null
+          id: string
+          instance_name: string
+          is_resolved: boolean | null
+          message: string
+          resolved_at: string | null
+          seller_id: string
+          severity: string | null
+        }
+        Insert: {
+          alert_type: string
+          created_at?: string | null
+          id?: string
+          instance_name: string
+          is_resolved?: boolean | null
+          message: string
+          resolved_at?: string | null
+          seller_id: string
+          severity?: string | null
+        }
+        Update: {
+          alert_type?: string
+          created_at?: string | null
+          id?: string
+          instance_name?: string
+          is_resolved?: boolean | null
+          message?: string
+          resolved_at?: string | null
+          seller_id?: string
+          severity?: string | null
+        }
+        Relationships: []
+      }
+      connection_logs: {
+        Row: {
+          created_at: string | null
+          error_code: string | null
+          error_message: string | null
+          event_source: string
+          event_type: string
+          id: string
+          instance_name: string
+          is_connected: boolean | null
+          metadata: Json | null
+          new_state: string | null
+          previous_state: string | null
+          seller_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          event_source?: string
+          event_type: string
+          id?: string
+          instance_name: string
+          is_connected?: boolean | null
+          metadata?: Json | null
+          new_state?: string | null
+          previous_state?: string | null
+          seller_id: string
+        }
+        Update: {
+          created_at?: string | null
+          error_code?: string | null
+          error_message?: string | null
+          event_source?: string
+          event_type?: string
+          id?: string
+          instance_name?: string
+          is_connected?: boolean | null
+          metadata?: Json | null
+          new_state?: string | null
+          previous_state?: string | null
+          seller_id?: string
+        }
+        Relationships: []
+      }
       coupons: {
         Row: {
           code: string
@@ -1922,17 +2003,26 @@ export type Database = {
           blocked_at: string | null
           blocked_reason: string | null
           configuration_error: string | null
+          connection_source: string | null
           created_at: string | null
+          heartbeat_failures: number | null
           id: string
           instance_blocked: boolean
           instance_link: string | null
           instance_name: string
           is_connected: boolean | null
           last_connection_check: string | null
+          last_evolution_state: string | null
+          last_heartbeat_at: string | null
+          last_reconnect_attempt_at: string | null
+          offline_since: string | null
           original_instance_name: string | null
           plan_expires_at: string | null
           plan_status: string
+          reconnect_attempts: number | null
           seller_id: string
+          session_id: string | null
+          session_valid: boolean | null
           updated_at: string | null
           webhook_auto_configured: boolean | null
         }
@@ -1942,17 +2032,26 @@ export type Database = {
           blocked_at?: string | null
           blocked_reason?: string | null
           configuration_error?: string | null
+          connection_source?: string | null
           created_at?: string | null
+          heartbeat_failures?: number | null
           id?: string
           instance_blocked?: boolean
           instance_link?: string | null
           instance_name?: string
           is_connected?: boolean | null
           last_connection_check?: string | null
+          last_evolution_state?: string | null
+          last_heartbeat_at?: string | null
+          last_reconnect_attempt_at?: string | null
+          offline_since?: string | null
           original_instance_name?: string | null
           plan_expires_at?: string | null
           plan_status?: string
+          reconnect_attempts?: number | null
           seller_id: string
+          session_id?: string | null
+          session_valid?: boolean | null
           updated_at?: string | null
           webhook_auto_configured?: boolean | null
         }
@@ -1962,17 +2061,26 @@ export type Database = {
           blocked_at?: string | null
           blocked_reason?: string | null
           configuration_error?: string | null
+          connection_source?: string | null
           created_at?: string | null
+          heartbeat_failures?: number | null
           id?: string
           instance_blocked?: boolean
           instance_link?: string | null
           instance_name?: string
           is_connected?: boolean | null
           last_connection_check?: string | null
+          last_evolution_state?: string | null
+          last_heartbeat_at?: string | null
+          last_reconnect_attempt_at?: string | null
+          offline_since?: string | null
           original_instance_name?: string | null
           plan_expires_at?: string | null
           plan_status?: string
+          reconnect_attempts?: number | null
           seller_id?: string
+          session_id?: string | null
+          session_valid?: boolean | null
           updated_at?: string | null
           webhook_auto_configured?: boolean | null
         }
@@ -2117,10 +2225,21 @@ export type Database = {
           seller_id: string
         }[]
       }
+      cleanup_old_connection_logs: { Args: never; Returns: number }
       cleanup_old_login_attempts: { Args: never; Returns: undefined }
       create_admin_templates: {
         Args: { admin_uuid: string }
         Returns: undefined
+      }
+      create_connection_alert: {
+        Args: {
+          p_alert_type: string
+          p_instance_name: string
+          p_message: string
+          p_seller_id: string
+          p_severity: string
+        }
+        Returns: string
       }
       create_default_chatbot_categories: {
         Args: { p_seller_id: string }
@@ -2159,9 +2278,32 @@ export type Database = {
         Returns: boolean
       }
       is_user_blocked: { Args: { user_email: string }; Returns: boolean }
+      log_connection_event: {
+        Args: {
+          p_error_code?: string
+          p_error_message?: string
+          p_event_source: string
+          p_event_type: string
+          p_instance_name: string
+          p_is_connected: boolean
+          p_metadata?: Json
+          p_new_state: string
+          p_previous_state: string
+          p_seller_id: string
+        }
+        Returns: string
+      }
       normalize_server_name: { Args: { name: string }; Returns: string }
       unblock_seller_instance: {
         Args: { p_seller_id: string }
+        Returns: boolean
+      }
+      update_instance_heartbeat: {
+        Args: {
+          p_evolution_state?: string
+          p_is_connected: boolean
+          p_seller_id: string
+        }
         Returns: boolean
       }
     }
