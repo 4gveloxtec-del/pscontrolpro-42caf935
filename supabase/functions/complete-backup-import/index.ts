@@ -6,10 +6,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Ordem exata de processamento conforme especificado
+// ============================================
+// CONFIGURAÇÃO
+// ============================================
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const BATCH_SIZE = 100;
+
+// Ordem obrigatória de importação (respeitando FKs)
 const IMPORT_ORDER = [
   'profiles',
-  'servers',
+  'servers', 
   'plans',
   'clients',
   'coupons',
@@ -30,8 +36,49 @@ const IMPORT_ORDER = [
   'server_apps',
 ] as const;
 
-const BATCH_SIZE = 500;
+// ============================================
+// TIPOS
+// ============================================
+interface ImportReport {
+  status: 'success' | 'partial_success' | 'failed';
+  phase: string;
+  startTime: number;
+  endTime?: number;
+  totalTimeMs?: number;
+  stats: {
+    expected: Record<string, number>;
+    imported: Record<string, number>;
+    skipped: Record<string, number>;
+    errors: Record<string, number>;
+  };
+  errorDetails: Array<{
+    table: string;
+    index: number;
+    field?: string;
+    reason: string;
+  }>;
+  warnings: string[];
+  mappings: {
+    profiles: number;
+    servers: number;
+    plans: number;
+    clients: number;
+  };
+}
 
+interface IndexMaps {
+  emailToSellerId: Map<string, string>;
+  serverKeyToId: Map<string, string>;  // "email|name" -> id
+  planKeyToId: Map<string, string>;    // "email|name" -> id
+  clientKeyToId: Map<string, string>;  // "email|identifier" -> id
+  templateKeyToId: Map<string, string>;
+  panelKeyToId: Map<string, string>;
+  extAppKeyToId: Map<string, string>;
+}
+
+// ============================================
+// SERVE
+// ============================================
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -40,43 +87,61 @@ serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
-  
-  let jobId: string | null = null;
-  let currentTable: string | null = null;
 
-  // Helper to save error to job
-  const saveJobError = async (errorMessage: string, tableName?: string) => {
-    const fullError = tableName 
-      ? `Erro na tabela "${tableName}": ${errorMessage}`
-      : errorMessage;
-    
-    if (jobId) {
-      try {
-        await supabase
-          .from('backup_import_jobs')
-          .update({
-            status: 'failed',
-            errors: [fullError],
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', jobId);
-      } catch (e) {
-        console.error('Failed to save job error:', e);
-      }
+  let jobId: string | null = null;
+  const report: ImportReport = {
+    status: 'failed',
+    phase: 'init',
+    startTime: Date.now(),
+    stats: { expected: {}, imported: {}, skipped: {}, errors: {} },
+    errorDetails: [],
+    warnings: [],
+    mappings: { profiles: 0, servers: 0, plans: 0, clients: 0 },
+  };
+
+  // ============================================
+  // HELPERS
+  // ============================================
+  const updateJob = async (updates: Record<string, any>) => {
+    if (!jobId) return;
+    try {
+      await supabase
+        .from('backup_import_jobs')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .eq('id', jobId);
+    } catch (e) {
+      console.error('Failed to update job:', e);
     }
-    return fullError;
+  };
+
+  const logError = (table: string, index: number, reason: string, field?: string) => {
+    report.errorDetails.push({ table, index, field, reason });
+    report.stats.errors[table] = (report.stats.errors[table] || 0) + 1;
+    console.error(`[${table}][${index}]${field ? `[${field}]` : ''}: ${reason}`);
+  };
+
+  const chunkArray = <T>(arr: T[], size: number): T[][] => {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
   };
 
   try {
-    console.log(`=== COMPLETE-BACKUP-IMPORT V5 - FIX SELLER MAPPING ===`);
+    console.log('=== ADVANCED BACKUP IMPORT V6 ===');
+    console.log(`Max file size: ${MAX_FILE_SIZE / 1024 / 1024}MB`);
+    console.log(`Batch size: ${BATCH_SIZE}`);
+
+    // ============================================
+    // FASE 0: AUTENTICAÇÃO
+    // ============================================
+    report.phase = 'authentication';
     
-    // ==========================================
-    // 1. AUTENTICAÇÃO E VALIDAÇÃO DE ADMIN
-    // ==========================================
     const authHeader = req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!authHeader?.startsWith('Bearer ')) {
       return new Response(
-        JSON.stringify({ error: 'Sessão expirada. Faça login novamente.' }),
+        JSON.stringify({ error: 'Sessão expirada. Faça login novamente.', report }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -86,102 +151,181 @@ serve(async (req) => {
     
     if (userError || !userData?.user) {
       return new Response(
-        JSON.stringify({ error: 'Sessão inválida ou expirada.' }),
+        JSON.stringify({ error: 'Sessão inválida ou expirada.', report }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     const adminUserId = userData.user.id;
     const adminEmail = userData.user.email;
-    console.log(`Admin autenticado: ${adminEmail} (${adminUserId})`);
+    console.log(`Admin: ${adminEmail} (${adminUserId})`);
 
-    // Verificar role de admin
-    const { data: roleRows, error: roleError } = await supabase
+    // Verificar role admin
+    const { data: roleRows } = await supabase
       .from('user_roles')
       .select('role')
       .eq('user_id', adminUserId);
 
-    if (roleError) {
-      return new Response(
-        JSON.stringify({ error: 'Falha ao verificar permissões.' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
     const hasAdminRole = Array.isArray(roleRows) && roleRows.some((r: any) => r?.role === 'admin');
     if (!hasAdminRole) {
       return new Response(
-        JSON.stringify({ error: 'Acesso negado. Apenas administradores podem restaurar backups.' }),
+        JSON.stringify({ error: 'Acesso negado. Apenas administradores.', report }),
         { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log('Role de admin verificada');
+    // ============================================
+    // FASE 1: LEITURA E VALIDAÇÃO DO ARQUIVO
+    // ============================================
+    report.phase = 'reading';
+    console.log('=== FASE 1: Leitura do arquivo ===');
 
-    // ==========================================
-    // 2. PARSE DO BODY E VALIDAÇÃO DO BACKUP
-    // ==========================================
-    let requestBody: any;
+    // Ler corpo completo como texto
+    let rawBody: string;
     try {
-      requestBody = await req.json();
-    } catch (parseError) {
+      const contentLength = parseInt(req.headers.get('content-length') || '0');
+      console.log(`Content-Length header: ${contentLength} bytes`);
+      
+      if (contentLength > MAX_FILE_SIZE) {
+        return new Response(
+          JSON.stringify({ 
+            error: `Arquivo muito grande. Máximo: ${MAX_FILE_SIZE / 1024 / 1024}MB`,
+            report 
+          }),
+          { status: 413, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      rawBody = await req.text();
+      console.log(`Raw body length: ${rawBody.length} chars`);
+    } catch (readError) {
+      const msg = readError instanceof Error ? readError.message : 'Erro desconhecido';
       return new Response(
-        JSON.stringify({ error: 'Falha ao processar o arquivo. Verifique se o JSON é válido.' }),
+        JSON.stringify({ error: `Falha na leitura do arquivo: ${msg}`, report }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Parse JSON com validação
+    report.phase = 'parsing';
+    console.log('=== FASE 1.1: Parse JSON ===');
+    
+    let requestBody: any;
+    try {
+      // Validação estrutural prévia - verificar se JSON fecha corretamente
+      const trimmed = rawBody.trim();
+      if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+        throw new Error('JSON incompleto ou truncado - não começa/termina com {}');
+      }
+      
+      requestBody = JSON.parse(rawBody);
+    } catch (parseError) {
+      const msg = parseError instanceof Error ? parseError.message : 'Erro de sintaxe';
+      // Tentar extrair posição do erro
+      const posMatch = msg.match(/position (\d+)/);
+      const position = posMatch ? parseInt(posMatch[1]) : null;
+      
+      return new Response(
+        JSON.stringify({ 
+          error: `JSON inválido: ${msg}${position ? ` (posição ${position})` : ''}`,
+          report 
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Liberar memória do raw body
+    rawBody = '';
 
     const { backup, mode, modules, jobId: receivedJobId } = requestBody;
     jobId = receivedJobId;
 
-    // ==========================================
-    // DETECÇÃO DE FORMATO DO BACKUP
-    // ==========================================
-    const backupVersion = backup?.version || '1.0';
-    const backupFormat = backup?.format || '';
-    
-    // V3: 3.0-complete-clean com _seller_email (clean-logical-keys)
-    const isV3Format = backupVersion?.includes('3.0') || backupFormat === 'clean-logical-keys';
-    
-    console.log(`=== FORMATO DETECTADO ===`);
-    console.log(`Version: ${backupVersion}, Format: ${backupFormat}`);
-    console.log(`É formato V3 (clean-logical-keys): ${isV3Format}`);
-    console.log(`Backup keys:`, Object.keys(backup || {}));
-    console.log(`Data keys:`, Object.keys(backup?.data || {}));
-    console.log(`Modules selecionados:`, modules);
-    console.log(`Stats:`, backup?.stats);
+    // ============================================
+    // FASE 1.2: VALIDAÇÃO DO FORMATO
+    // ============================================
+    report.phase = 'validation';
+    console.log('=== FASE 1.2: Validação do formato ===');
 
-    // Validar estrutura do backup
-    if (!backup || !backup.data || typeof backup.data !== 'object') {
-      const errorMsg = 'Formato de backup inválido. Estrutura "data" não encontrada.';
-      await saveJobError(errorMsg);
+    // Campos obrigatórios
+    if (!backup) {
       return new Response(
-        JSON.stringify({ error: errorMsg }),
+        JSON.stringify({ error: 'Campo "backup" não encontrado no request.', report }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Verificar se há dados para restaurar
-    const hasAnyData = Object.values(backup.data).some((arr: any) => Array.isArray(arr) && arr.length > 0);
-    if (!hasAnyData) {
-      const errorMsg = 'Backup vazio. Nenhum dado para restaurar.';
-      await saveJobError(errorMsg);
+    const version = backup.version || '';
+    const format = backup.format || '';
+    
+    if (!version) {
+      report.warnings.push('Campo "version" ausente no backup');
+    }
+    if (!format) {
+      report.warnings.push('Campo "format" ausente no backup');
+    }
+    if (!backup.data || typeof backup.data !== 'object') {
       return new Response(
-        JSON.stringify({ error: errorMsg }),
+        JSON.stringify({ error: 'Campo "data" ausente ou inválido no backup.', report }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // ==========================================
-    // 3. INICIALIZAÇÃO DO JOB
-    // ==========================================
-    const results = {
-      success: true,
-      restored: {} as Record<string, number>,
-      errors: [] as string[],
-      skipped: {} as Record<string, number>,
-      warnings: [] as string[],
+    // Verificar versão compatível
+    const isValidVersion = version.includes('3.0') || format === 'clean-logical-keys';
+    if (!isValidVersion) {
+      report.warnings.push(`Versão "${version}" pode não ser totalmente compatível`);
+    }
+
+    console.log(`Version: ${version}, Format: ${format}`);
+    console.log(`Data keys: ${Object.keys(backup.data).join(', ')}`);
+
+    // Coletar stats esperados
+    const backupStats = backup.stats || {};
+    for (const [key, value] of Object.entries(backup.data)) {
+      if (Array.isArray(value)) {
+        report.stats.expected[key] = value.length;
+      }
+    }
+    console.log('Expected stats:', report.stats.expected);
+
+    // Verificar se há dados
+    const hasData = Object.values(backup.data).some((arr: any) => Array.isArray(arr) && arr.length > 0);
+    if (!hasData) {
+      return new Response(
+        JSON.stringify({ error: 'Backup vazio - nenhum dado para importar.', report }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // ============================================
+    // FASE 1.3: INDEXAÇÃO PRÉVIA
+    // ============================================
+    report.phase = 'indexing';
+    console.log('=== FASE 1.3: Criação de índices ===');
+
+    const maps: IndexMaps = {
+      emailToSellerId: new Map(),
+      serverKeyToId: new Map(),
+      planKeyToId: new Map(),
+      clientKeyToId: new Map(),
+      templateKeyToId: new Map(),
+      panelKeyToId: new Map(),
+      extAppKeyToId: new Map(),
     };
+
+    // Pré-mapear admin atual
+    if (adminEmail) {
+      maps.emailToSellerId.set(adminEmail, adminUserId);
+    }
+
+    // Criar índices temporários dos dados do backup para referência cruzada
+    const profilesByEmail = new Map<string, any>();
+    for (const profile of (backup.data.profiles || [])) {
+      if (profile.email) {
+        profilesByEmail.set(profile.email, profile);
+      }
+    }
+    console.log(`Indexed ${profilesByEmail.size} profiles by email`);
 
     // Calcular total de itens
     let totalItems = 0;
@@ -191,129 +335,59 @@ serve(async (req) => {
     }
     let processedItems = 0;
 
-    console.log(`Total de itens a processar: ${totalItems}`);
+    // Atualizar job
+    await updateJob({
+      status: 'processing',
+      progress: 5,
+      total_items: totalItems,
+      processed_items: 0,
+    });
 
-    // Atualizar job para "processing"
-    if (jobId) {
-      await supabase
-        .from('backup_import_jobs')
-        .update({
-          status: 'processing',
-          progress: 1,
-          total_items: totalItems,
-          processed_items: 0,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', jobId);
-    }
-
-    // ==========================================
-    // 4. HELPERS
-    // ==========================================
-    const updateProgress = async (status: string = 'processing') => {
-      if (!jobId) return;
-      const progress = totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0;
-      try {
-        await supabase
-          .from('backup_import_jobs')
-          .update({
-            status,
-            progress,
-            processed_items: processedItems,
-            total_items: totalItems,
-            restored: results.restored,
-            warnings: results.warnings.slice(-100),
-            errors: results.errors.slice(-100),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', jobId);
-      } catch (e) {
-        console.error('Failed to update progress:', e);
-      }
-    };
-
-    const chunkArray = <T>(arr: T[], size: number): T[][] => {
-      const chunks: T[][] = [];
-      for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
-      return chunks;
-    };
-
-    // Verificar se módulo deve ser importado
-    const shouldImport = (moduleName: string): boolean => {
+    // Helper para verificar módulo
+    const shouldImport = (name: string): boolean => {
       if (!modules || modules.length === 0) return true;
-      return modules.includes(moduleName);
+      return modules.includes(name);
     };
 
-    // ==========================================
-    // 5. MAPAS DE RELACIONAMENTO
-    // ==========================================
-    // email -> sellerId (criado ou existente)
-    const emailToSellerId = new Map<string, string>();
-    
-    // Para mapear relacionamentos dentro do mesmo seller
-    // Formato: email|name -> id
-    const serverNameToId = new Map<string, string>();
-    const planNameToId = new Map<string, string>();
-    const clientIdentifierToId = new Map<string, string>();
-    const extAppNameToId = new Map<string, string>();
-    const templateNameToId = new Map<string, string>();
-    const panelNameToId = new Map<string, string>();
-
-    // Mapear email do admin atual
-    if (adminEmail) {
-      emailToSellerId.set(adminEmail, adminUserId);
-    }
-
-    // ==========================================
-    // HELPER: Obter seller email do item (V3)
-    // ==========================================
+    // Helper para obter seller email
     const getSellerEmail = (item: any): string | null => {
-      // V3: usa _seller_email
-      if (item._seller_email) return item._seller_email;
-      // Para profiles, o email é o próprio identificador
-      if (item.email && !item._seller_email) return item.email;
-      return null;
+      return item._seller_email || item.seller_email || item.email || null;
     };
 
-    // ==========================================
-    // HELPER: Obter seller_id para import
-    // ==========================================
-    const getImportSellerId = (item: any): string | null => {
+    // Helper para obter seller_id
+    const getSellerId = (item: any): string | null => {
       const email = getSellerEmail(item);
       if (email) {
-        const mappedId = emailToSellerId.get(email);
-        if (mappedId) return mappedId;
-        console.log(`Warning: Email não mapeado: ${email}`);
+        return maps.emailToSellerId.get(email) || null;
       }
       return null;
     };
 
-    // ==========================================
-    // 6. MODO REPLACE - LIMPAR BASE
-    // ==========================================
+    // ============================================
+    // FASE 2: LIMPEZA (modo replace)
+    // ============================================
     if (mode === 'replace') {
-      console.log('=== LIMPANDO BASE (preservando admin) ===');
-      currentTable = 'cleanup';
+      report.phase = 'cleanup';
+      console.log('=== FASE 2: Limpeza de dados existentes ===');
 
       try {
-        // Pegar todos os emails dos profiles no backup
-        const backupProfiles = backup.data.profiles || [];
-        const backupEmails = new Set(backupProfiles.map((p: any) => p.email));
-        
-        // Buscar IDs dos sellers que existem
+        const backupEmails = new Set(
+          (backup.data.profiles || []).map((p: any) => p.email).filter(Boolean)
+        );
+
+        // Buscar sellers existentes
         const { data: existingProfiles } = await supabase
           .from('profiles')
           .select('id, email');
-        
+
         const sellersToClean = (existingProfiles || [])
           .filter((p: any) => backupEmails.has(p.email) || p.id === adminUserId)
           .map((p: any) => p.id);
 
-        console.log(`Limpando dados de ${sellersToClean.length} sellers...`);
-        console.log(`Emails no backup:`, Array.from(backupEmails));
+        console.log(`Cleaning data for ${sellersToClean.length} sellers`);
 
-        // Tabelas para limpar (ordem respeitando FKs)
-        const deleteTablesForSeller = [
+        // Ordem de deleção (respeita FKs)
+        const deleteTables = [
           'client_notification_tracking',
           'client_external_apps',
           'client_premium_accounts',
@@ -334,70 +408,99 @@ serve(async (req) => {
           'monthly_profits',
         ];
 
-        for (const table of deleteTablesForSeller) {
+        for (const table of deleteTables) {
           for (const sellerId of sellersToClean) {
-            const { error } = await supabase.from(table).delete().eq('seller_id', sellerId);
-            if (error && !error.message.includes('0 rows')) {
-              console.log(`Warning cleanup ${table}: ${error.message}`);
-            }
+            await supabase.from(table).delete().eq('seller_id', sellerId);
           }
         }
-        
-        // Limpar tabelas globais se aplicável
+
+        // Tabelas globais
         if (shouldImport('default_server_icons')) {
           await supabase.from('default_server_icons').delete().neq('id', '00000000-0000-0000-0000-000000000000');
         }
         if (shouldImport('app_settings')) {
           await supabase.from('app_settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
         }
-        
-        console.log('Base limpa com sucesso');
+
+        console.log('Cleanup completed');
       } catch (cleanError) {
-        const errorMsg = cleanError instanceof Error ? cleanError.message : 'Erro desconhecido';
-        const fullError = await saveJobError(errorMsg, 'cleanup');
-        return new Response(
-          JSON.stringify({ error: fullError }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        report.warnings.push(`Erro na limpeza: ${cleanError instanceof Error ? cleanError.message : 'desconhecido'}`);
       }
     }
 
-    // ==========================================
-    // 7. IMPORTAÇÃO
-    // ==========================================
+    await updateJob({ progress: 10 });
+
+    // ============================================
+    // FASE 3: IMPORTAÇÃO PRINCIPAL
+    // ============================================
+    report.phase = 'importing';
+    console.log('=== FASE 3: Importação principal ===');
 
     // ----------------------------------------
-    // 1. PROFILES - Criar/mapear usuários PRIMEIRO
+    // 1. PROFILES
     // ----------------------------------------
     if (shouldImport('profiles')) {
       const tableData = backup.data.profiles || [];
       if (tableData.length > 0) {
-        currentTable = 'profiles';
-        console.log(`=== IMPORTANDO PROFILES (${tableData.length}) ===`);
+        console.log(`\n[PROFILES] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
-        for (const profile of tableData) {
-          const profileEmail = profile.email;
-          if (!profileEmail) {
-            results.warnings.push(`Perfil sem email, ignorando`);
-            processedItems++;
+        for (let i = 0; i < tableData.length; i++) {
+          const profile = tableData[i];
+          
+          if (!profile.email) {
+            logError('profiles', i, 'Email ausente');
+            skipped++;
             continue;
           }
 
-          // Verificar se já existe
-          const { data: existing } = await supabase
-            .from('profiles')
-            .select('id, email')
-            .eq('email', profileEmail)
-            .single();
+          try {
+            // Verificar se existe
+            const { data: existing } = await supabase
+              .from('profiles')
+              .select('id')
+              .eq('email', profile.email)
+              .single();
 
-          if (existing) {
-            // Mapear email para ID existente
-            emailToSellerId.set(profileEmail, existing.id);
-            console.log(`Profile existente: ${profileEmail} -> ${existing.id}`);
-            
-            // Atualizar dados do profile se em modo replace
-            if (mode === 'replace') {
+            if (existing) {
+              maps.emailToSellerId.set(profile.email, existing.id);
+              
+              if (mode === 'replace') {
+                await supabase
+                  .from('profiles')
+                  .update({
+                    full_name: profile.full_name,
+                    whatsapp: profile.whatsapp,
+                    company_name: profile.company_name,
+                    pix_key: profile.pix_key,
+                    is_active: profile.is_active,
+                    is_permanent: profile.is_permanent,
+                    subscription_expires_at: profile.subscription_expires_at,
+                    tutorial_visto: profile.tutorial_visto,
+                  })
+                  .eq('id', existing.id);
+                imported++;
+              } else {
+                skipped++;
+              }
+            } else {
+              // Criar novo usuário
+              const randomPassword = Math.random().toString(36).slice(-12) + 'A1!';
+              const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+                email: profile.email,
+                email_confirm: true,
+                password: randomPassword,
+                user_metadata: { full_name: profile.full_name }
+              });
+
+              if (authError) {
+                logError('profiles', i, authError.message, 'auth');
+                skipped++;
+                continue;
+              }
+
+              maps.emailToSellerId.set(profile.email, authUser.user.id);
+
               await supabase
                 .from('profiles')
                 .update({
@@ -409,91 +512,58 @@ serve(async (req) => {
                   is_permanent: profile.is_permanent,
                   subscription_expires_at: profile.subscription_expires_at,
                   tutorial_visto: profile.tutorial_visto,
+                  needs_password_update: true,
                 })
-                .eq('id', existing.id);
-              count++;
+                .eq('id', authUser.user.id);
+
+              imported++;
             }
-            processedItems++;
-            continue;
+          } catch (err) {
+            logError('profiles', i, err instanceof Error ? err.message : 'Erro desconhecido');
+            skipped++;
           }
 
-          // Criar novo usuário
-          const randomPassword = Math.random().toString(36).slice(-12) + 'A1!';
-          const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
-            email: profileEmail,
-            email_confirm: true,
-            password: randomPassword,
-            user_metadata: { full_name: profile.full_name, whatsapp: profile.whatsapp }
-          });
-
-          if (authError) {
-            results.errors.push(`Usuário ${profileEmail}: ${authError.message}`);
-            processedItems++;
-            continue;
-          }
-
-          emailToSellerId.set(profileEmail, authUser.user.id);
-          console.log(`Profile criado: ${profileEmail} -> ${authUser.user.id}`);
-
-          // Atualizar profile com dados do backup
-          await supabase
-            .from('profiles')
-            .update({
-              full_name: profile.full_name,
-              whatsapp: profile.whatsapp,
-              company_name: profile.company_name,
-              pix_key: profile.pix_key,
-              is_active: profile.is_active,
-              is_permanent: profile.is_permanent,
-              subscription_expires_at: profile.subscription_expires_at,
-              tutorial_visto: profile.tutorial_visto,
-              needs_password_update: true,
-            })
-            .eq('id', authUser.user.id);
-
-          count++;
           processedItems++;
         }
-        results.restored.profiles = count;
-        await updateProgress();
+
+        report.stats.imported.profiles = imported;
+        report.stats.skipped.profiles = skipped;
+        report.mappings.profiles = maps.emailToSellerId.size;
+        console.log(`[PROFILES] Done: ${imported} imported, ${skipped} skipped`);
       }
     }
 
-    console.log(`=== Email->SellerId mappings (${emailToSellerId.size}) ===`);
-    emailToSellerId.forEach((v, k) => console.log(`  ${k} -> ${v}`));
+    await updateJob({ progress: 20, restored: report.stats.imported });
 
     // ----------------------------------------
-    // 2. SERVERS
+    // 2. SERVERS (batch)
     // ----------------------------------------
     if (shouldImport('servers')) {
-      const tableData = backup.data.servers || [];
+      const tableData: any[] = backup.data.servers || [];
       if (tableData.length > 0) {
-        currentTable = 'servers';
-        console.log(`=== IMPORTANDO SERVERS (${tableData.length}) ===`);
+        console.log(`\n[SERVERS] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
-        let skipped = 0;
-        for (const server of tableData) {
-          const sellerEmail = getSellerEmail(server);
-          const sellerId = getImportSellerId(server);
+        for (const chunk of chunkArray(tableData, BATCH_SIZE)) {
+          const rows: any[] = [];
           
-          if (!sellerId) {
-            skipped++;
-            results.warnings.push(`Servidor "${server.name}": seller não encontrado (${sellerEmail})`);
-            processedItems++;
-            continue;
-          }
+          for (let i = 0; i < chunk.length; i++) {
+            const server: any = chunk[i];
+            const sellerEmail = getSellerEmail(server);
+            const sellerId = getSellerId(server);
 
-          const serverName = server.name;
+            if (!sellerId) {
+              logError('servers', i, `Seller não encontrado: ${sellerEmail}`, '_seller_email');
+              skipped++;
+              continue;
+            }
 
-          const { data: inserted, error } = await supabase
-            .from('servers')
-            .insert({
+            rows.push({
               seller_id: sellerId,
-              name: serverName,
+              name: server.name,
               panel_url: server.panel_url,
               monthly_cost: server.monthly_cost || 0,
-              is_credit_based: server.is_credit_based,
+              is_credit_based: server.is_credit_based ?? false,
               total_credits: server.total_credits || 0,
               used_credits: server.used_credits || 0,
               credit_price: server.credit_price || 0,
@@ -504,134 +574,182 @@ serve(async (req) => {
               icon_url: server.icon_url,
               notes: server.notes,
               is_active: server.is_active !== false,
-            })
-            .select('id')
-            .single();
-
-          if (!error && inserted) {
-            // Mapear por email|name para resolver clients depois
-            serverNameToId.set(`${sellerEmail}|${serverName}`, inserted.id);
-            console.log(`Server mapeado: ${sellerEmail}|${serverName} -> ${inserted.id}`);
-            count++;
-          } else if (error) {
-            results.errors.push(`Servidor "${serverName}": ${error.message}`);
+              _temp_email: sellerEmail,
+              _temp_name: server.name,
+            });
           }
-          processedItems++;
+
+          if (rows.length > 0) {
+            const insertRows = rows.map((r: any) => {
+              const { _temp_email, _temp_name, ...rest } = r;
+              return rest;
+            });
+
+            const { data: inserted, error } = await supabase
+              .from('servers')
+              .insert(insertRows)
+              .select('id, name, seller_id');
+
+            if (error) {
+              for (let j = 0; j < rows.length; j++) {
+                const { _temp_email, _temp_name, ...row } = rows[j];
+                const { data: single, error: singleErr } = await supabase
+                  .from('servers')
+                  .insert(row)
+                  .select('id')
+                  .single();
+
+                if (!singleErr && single) {
+                  maps.serverKeyToId.set(`${_temp_email}|${_temp_name}`, single.id);
+                  imported++;
+                } else {
+                  logError('servers', j, singleErr?.message || 'Erro inserção');
+                  skipped++;
+                }
+              }
+            } else if (inserted) {
+              for (let j = 0; j < inserted.length; j++) {
+                const email = rows[j]._temp_email;
+                const name = rows[j]._temp_name;
+                maps.serverKeyToId.set(`${email}|${name}`, inserted[j].id);
+                imported++;
+              }
+            }
+          }
+
+          processedItems += chunk.length;
         }
-        results.restored.servers = count;
-        if (skipped > 0) results.skipped.servers = skipped;
-        await updateProgress();
+
+        report.stats.imported.servers = imported;
+        report.stats.skipped.servers = skipped;
+        report.mappings.servers = maps.serverKeyToId.size;
+        console.log(`[SERVERS] Done: ${imported} imported, ${skipped} skipped, ${maps.serverKeyToId.size} mapped`);
       }
     }
 
-    console.log(`=== Server mappings (${serverNameToId.size}) ===`);
+    await updateJob({ progress: 30, restored: report.stats.imported });
 
     // ----------------------------------------
-    // 3. PLANS
+    // 3. PLANS (batch)
     // ----------------------------------------
     if (shouldImport('plans')) {
-      const tableData = backup.data.plans || [];
+      const tableData: any[] = backup.data.plans || [];
       if (tableData.length > 0) {
-        currentTable = 'plans';
-        console.log(`=== IMPORTANDO PLANS (${tableData.length}) ===`);
+        console.log(`\n[PLANS] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
-        let skipped = 0;
-        for (const plan of tableData) {
-          const sellerEmail = getSellerEmail(plan);
-          const sellerId = getImportSellerId(plan);
-          
-          if (!sellerId) {
-            skipped++;
-            processedItems++;
-            continue;
-          }
+        for (const chunk of chunkArray(tableData, BATCH_SIZE)) {
+          const rows: any[] = [];
 
-          const planName = plan.name;
+          for (let i = 0; i < chunk.length; i++) {
+            const plan: any = chunk[i];
+            const sellerEmail = getSellerEmail(plan);
+            const sellerId = getSellerId(plan);
 
-          const { data: inserted, error } = await supabase
-            .from('plans')
-            .insert({
+            if (!sellerId) {
+              skipped++;
+              continue;
+            }
+
+            rows.push({
               seller_id: sellerId,
-              name: planName,
+              name: plan.name,
               price: plan.price || 0,
               duration_days: plan.duration_days || 30,
               category: plan.category,
               description: plan.description,
               screens: plan.screens || 1,
               is_active: plan.is_active !== false,
-            })
-            .select('id')
-            .single();
-
-          if (!error && inserted) {
-            planNameToId.set(`${sellerEmail}|${planName}`, inserted.id);
-            count++;
-          } else if (error) {
-            results.errors.push(`Plano "${planName}": ${error.message}`);
+              _temp_email: sellerEmail,
+              _temp_name: plan.name,
+            });
           }
-          processedItems++;
+
+          if (rows.length > 0) {
+            const insertRows = rows.map((r: any) => {
+              const { _temp_email, _temp_name, ...rest } = r;
+              return rest;
+            });
+
+            const { data: inserted, error } = await supabase
+              .from('plans')
+              .insert(insertRows)
+              .select('id');
+
+            if (error) {
+              for (let j = 0; j < rows.length; j++) {
+                const { _temp_email, _temp_name, ...row } = rows[j];
+                const { data: single, error: singleErr } = await supabase
+                  .from('plans')
+                  .insert(row)
+                  .select('id')
+                  .single();
+
+                if (!singleErr && single) {
+                  maps.planKeyToId.set(`${_temp_email}|${_temp_name}`, single.id);
+                  imported++;
+                } else {
+                  skipped++;
+                }
+              }
+            } else if (inserted) {
+              for (let j = 0; j < inserted.length; j++) {
+                maps.planKeyToId.set(`${rows[j]._temp_email}|${rows[j]._temp_name}`, inserted[j].id);
+                imported++;
+              }
+            }
+          }
+
+          processedItems += chunk.length;
         }
-        results.restored.plans = count;
-        if (skipped > 0) results.skipped.plans = skipped;
-        await updateProgress();
+
+        report.stats.imported.plans = imported;
+        report.stats.skipped.plans = skipped;
+        report.mappings.plans = maps.planKeyToId.size;
+        console.log(`[PLANS] Done: ${imported} imported, ${skipped} skipped`);
       }
     }
 
-    console.log(`=== Plan mappings (${planNameToId.size}) ===`);
+    await updateJob({ progress: 40, restored: report.stats.imported });
 
     // ----------------------------------------
-    // 4. CLIENTS
+    // 4. CLIENTS (batch)
     // ----------------------------------------
     if (shouldImport('clients')) {
-      const tableData = backup.data.clients || [];
+      const tableData: any[] = backup.data.clients || [];
       if (tableData.length > 0) {
-        currentTable = 'clients';
-        console.log(`=== IMPORTANDO CLIENTS (${tableData.length}) ===`);
+        console.log(`\n[CLIENTS] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
-        let skipped = 0;
-        for (const client of tableData) {
-          const sellerEmail = getSellerEmail(client);
-          const sellerId = getImportSellerId(client);
-          
-          if (!sellerId) {
-            skipped++;
-            results.warnings.push(`Cliente "${client.name}": seller não encontrado (${sellerEmail})`);
-            processedItems++;
-            continue;
-          }
-          
-          // Resolver server_id e plan_id por nome
-          let serverId = null;
-          let planId = null;
-          
-          if (client.server_name) {
-            serverId = serverNameToId.get(`${sellerEmail}|${client.server_name}`);
-            if (!serverId) {
-              // Tentar variações (com/sem espaços extras)
-              const normalizedName = client.server_name.trim();
-              serverId = serverNameToId.get(`${sellerEmail}|${normalizedName}`);
+        for (const chunk of chunkArray(tableData, BATCH_SIZE)) {
+          const rows: any[] = [];
+
+          for (let i = 0; i < chunk.length; i++) {
+            const client: any = chunk[i];
+            const sellerEmail = getSellerEmail(client);
+            const sellerId = getSellerId(client);
+
+            if (!sellerId) {
+              logError('clients', i, `Seller não encontrado: ${sellerEmail}`);
+              skipped++;
+              continue;
             }
-          }
-          
-          if (client.plan_name) {
-            planId = planNameToId.get(`${sellerEmail}|${client.plan_name}`);
-            if (!planId) {
-              const normalizedName = client.plan_name.trim();
-              planId = planNameToId.get(`${sellerEmail}|${normalizedName}`);
+
+            let serverId = null, planId = null, serverId2 = null;
+
+            if (client.server_name) {
+              serverId = maps.serverKeyToId.get(`${sellerEmail}|${client.server_name}`);
             }
-          }
+            if (client.plan_name) {
+              planId = maps.planKeyToId.get(`${sellerEmail}|${client.plan_name}`);
+            }
+            if (client.server_name_2) {
+              serverId2 = maps.serverKeyToId.get(`${sellerEmail}|${client.server_name_2}`);
+            }
 
-          // Resolver server_id_2
-          let serverId2 = null;
-          if (client.server_name_2) {
-            serverId2 = serverNameToId.get(`${sellerEmail}|${client.server_name_2}`);
-          }
+            const identifier = client._identifier || client.email || client.phone || client.name;
 
-          const { data: inserted, error } = await supabase
-            .from('clients')
-            .insert({
+            rows.push({
               seller_id: sellerId,
               name: client.name,
               phone: client.phone,
@@ -673,616 +791,430 @@ serve(async (req) => {
               paid_apps_duration: client.paid_apps_duration,
               premium_password: client.premium_password,
               premium_price: client.premium_price,
-            })
-            .select('id')
-            .single();
-
-          if (!error && inserted) {
-            // Mapear por identifier para tabelas relacionadas
-            const identifier = client._identifier || client.email || client.phone || client.name;
-            clientIdentifierToId.set(`${sellerEmail}|${identifier}`, inserted.id);
-            count++;
-          } else if (error) {
-            results.errors.push(`Cliente "${client.name}": ${error.message}`);
+              _temp_email: sellerEmail,
+              _temp_identifier: identifier,
+            });
           }
-          processedItems++;
 
-          if (processedItems % 50 === 0) await updateProgress();
-        }
-        results.restored.clients = count;
-        if (skipped > 0) results.skipped.clients = skipped;
-        await updateProgress();
-      }
-    }
-
-    console.log(`=== Client mappings (${clientIdentifierToId.size}) ===`);
-
-    // ----------------------------------------
-    // 5. COUPONS
-    // ----------------------------------------
-    if (shouldImport('coupons')) {
-      const tableData = backup.data.coupons || [];
-      if (tableData.length > 0) {
-        currentTable = 'coupons';
-        console.log(`=== IMPORTANDO COUPONS (${tableData.length}) ===`);
-
-        let count = 0;
-        for (const coupon of tableData) {
-          const sellerId = getImportSellerId(coupon);
-          if (!sellerId) { processedItems++; continue; }
-
-          const { error } = await supabase
-            .from('coupons')
-            .insert({
-              seller_id: sellerId,
-              code: coupon.code,
-              name: coupon.name,
-              discount_type: coupon.discount_type || 'fixed',
-              discount_value: coupon.discount_value || 0,
-              min_plan_value: coupon.min_plan_value,
-              max_uses: coupon.max_uses,
-              current_uses: coupon.current_uses || 0,
-              expires_at: coupon.expires_at,
-              is_active: coupon.is_active !== false,
+          if (rows.length > 0) {
+            const insertRows = rows.map((r: any) => {
+              const { _temp_email, _temp_identifier, ...rest } = r;
+              return rest;
             });
 
-          if (!error) count++;
-          processedItems++;
+            const { data: inserted, error } = await supabase
+              .from('clients')
+              .insert(insertRows)
+              .select('id');
+
+            if (error) {
+              for (let j = 0; j < rows.length; j++) {
+                const { _temp_email, _temp_identifier, ...row } = rows[j];
+                const { data: single, error: singleErr } = await supabase
+                  .from('clients')
+                  .insert(row)
+                  .select('id')
+                  .single();
+
+                if (!singleErr && single) {
+                  maps.clientKeyToId.set(`${_temp_email}|${_temp_identifier}`, single.id);
+                  imported++;
+                } else {
+                  logError('clients', j, singleErr?.message || 'Erro');
+                  skipped++;
+                }
+              }
+            } else if (inserted) {
+              for (let j = 0; j < inserted.length; j++) {
+                maps.clientKeyToId.set(`${rows[j]._temp_email}|${rows[j]._temp_identifier}`, inserted[j].id);
+                imported++;
+              }
+            }
+          }
+
+          processedItems += chunk.length;
+          await updateJob({ progress: 40 + Math.round((processedItems / totalItems) * 20), restored: report.stats.imported });
         }
-        results.restored.coupons = count;
-        await updateProgress();
+
+        report.stats.imported.clients = imported;
+        report.stats.skipped.clients = skipped;
+        report.mappings.clients = maps.clientKeyToId.size;
+        console.log(`[CLIENTS] Done: ${imported} imported, ${skipped} skipped`);
       }
     }
 
+    await updateJob({ progress: 60, restored: report.stats.imported });
+
     // ----------------------------------------
-    // 6. REFERRALS
+    // 5. SIMPLE TABLES (sem FKs complexas)
     // ----------------------------------------
+    const simpleTables = [
+      { name: 'coupons', fields: ['code', 'name', 'discount_type', 'discount_value', 'min_plan_value', 'max_uses', 'current_uses', 'expires_at', 'is_active'] },
+      { name: 'whatsapp_templates', fields: ['name', 'type', 'message', 'is_default'], needsMapping: true, mapTo: 'templateKeyToId' },
+      { name: 'bills_to_pay', fields: ['description', 'amount', 'due_date', 'recipient_name', 'recipient_pix', 'recipient_whatsapp', 'is_paid', 'paid_at', 'notes'] },
+      { name: 'shared_panels', fields: ['name', 'panel_type', 'monthly_cost', 'total_slots', 'used_slots', 'used_iptv_slots', 'used_p2p_slots', 'url', 'login', 'password', 'expires_at', 'iptv_per_credit', 'p2p_per_credit', 'notes', 'is_active'], needsMapping: true, mapTo: 'panelKeyToId' },
+      { name: 'client_categories', fields: ['name'] },
+      { name: 'external_apps', fields: ['name', 'auth_type', 'price', 'cost', 'website_url', 'download_url', 'is_active'], needsMapping: true, mapTo: 'extAppKeyToId' },
+      { name: 'custom_products', fields: ['name', 'icon', 'download_url', 'downloader_code', 'is_active'] },
+      { name: 'monthly_profits', fields: ['month', 'year', 'revenue', 'server_costs', 'bills_costs', 'net_profit', 'active_clients', 'closed_at'] },
+    ];
+
+    for (const tableConfig of simpleTables) {
+      if (!shouldImport(tableConfig.name)) continue;
+      
+      const tableData: any[] = backup.data[tableConfig.name] || [];
+      if (tableData.length === 0) continue;
+
+      console.log(`\n[${tableConfig.name.toUpperCase()}] Importing ${tableData.length} records...`);
+      let imported = 0, skipped = 0;
+
+      for (const chunk of chunkArray(tableData, BATCH_SIZE)) {
+        const rows: any[] = [];
+
+        for (const item of chunk) {
+          const itemAny = item as any;
+          const sellerEmail = getSellerEmail(itemAny);
+          const sellerId = getSellerId(itemAny);
+
+          if (!sellerId) {
+            skipped++;
+            continue;
+          }
+
+          const row: any = { seller_id: sellerId };
+          for (const field of tableConfig.fields) {
+            if (itemAny[field] !== undefined) {
+              row[field] = itemAny[field];
+            }
+          }
+
+          if (tableConfig.needsMapping) {
+            row._temp_email = sellerEmail;
+            row._temp_name = itemAny.name;
+          }
+
+          rows.push(row);
+        }
+
+        if (rows.length > 0) {
+          const insertRows = rows.map(r => {
+            const { _temp_email, _temp_name, ...rest } = r;
+            return rest;
+          });
+
+          const { data: inserted, error } = await supabase
+            .from(tableConfig.name)
+            .insert(insertRows)
+            .select('id');
+
+          if (!error && inserted) {
+            imported += inserted.length;
+            
+            if (tableConfig.needsMapping && tableConfig.mapTo) {
+              for (let j = 0; j < inserted.length; j++) {
+                const mapKey = `${rows[j]._temp_email}|${rows[j]._temp_name}`;
+                (maps as any)[tableConfig.mapTo].set(mapKey, inserted[j].id);
+              }
+            }
+          } else if (error) {
+            // Row-by-row fallback
+            for (const row of rows) {
+              const { _temp_email, _temp_name, ...r } = row;
+              const { data: single, error: sErr } = await supabase
+                .from(tableConfig.name)
+                .insert(r)
+                .select('id')
+                .single();
+              
+              if (!sErr && single) {
+                imported++;
+                if (tableConfig.needsMapping && tableConfig.mapTo) {
+                  (maps as any)[tableConfig.mapTo].set(`${_temp_email}|${_temp_name}`, single.id);
+                }
+              } else {
+                skipped++;
+              }
+            }
+          }
+        }
+
+        processedItems += chunk.length;
+      }
+
+      report.stats.imported[tableConfig.name] = imported;
+      report.stats.skipped[tableConfig.name] = skipped;
+      console.log(`[${tableConfig.name.toUpperCase()}] Done: ${imported} imported, ${skipped} skipped`);
+    }
+
+    await updateJob({ progress: 75, restored: report.stats.imported });
+
+    // ----------------------------------------
+    // 6. RELATIONAL TABLES (com FKs)
+    // ----------------------------------------
+    
+    // REFERRALS
     if (shouldImport('referrals')) {
       const tableData = backup.data.referrals || [];
       if (tableData.length > 0) {
-        currentTable = 'referrals';
-        console.log(`=== IMPORTANDO REFERRALS (${tableData.length}) ===`);
+        console.log(`\n[REFERRALS] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
         for (const ref of tableData) {
           const sellerEmail = getSellerEmail(ref);
-          const sellerId = getImportSellerId(ref);
-          if (!sellerId) { processedItems++; continue; }
+          const sellerId = getSellerId(ref);
+          if (!sellerId) { skipped++; continue; }
 
-          let referrerId = null;
-          let referredId = null;
+          const referrerId = ref._referrer_identifier ? maps.clientKeyToId.get(`${sellerEmail}|${ref._referrer_identifier}`) : null;
+          const referredId = ref._referred_identifier ? maps.clientKeyToId.get(`${sellerEmail}|${ref._referred_identifier}`) : null;
 
-          if (ref._referrer_identifier) {
-            referrerId = clientIdentifierToId.get(`${sellerEmail}|${ref._referrer_identifier}`);
-          }
-          if (ref._referred_identifier) {
-            referredId = clientIdentifierToId.get(`${sellerEmail}|${ref._referred_identifier}`);
-          }
+          if (!referrerId || !referredId) { skipped++; continue; }
 
-          if (!referrerId || !referredId) { processedItems++; continue; }
+          const { error } = await supabase.from('referrals').insert({
+            seller_id: sellerId,
+            referrer_client_id: referrerId,
+            referred_client_id: referredId,
+            discount_percentage: ref.discount_percentage || 0,
+            status: ref.status || 'pending',
+            completed_at: ref.completed_at,
+          });
 
-          const { error } = await supabase
-            .from('referrals')
-            .insert({
-              seller_id: sellerId,
-              referrer_client_id: referrerId,
-              referred_client_id: referredId,
-              discount_percentage: ref.discount_percentage || 0,
-              status: ref.status || 'pending',
-              completed_at: ref.completed_at,
-            });
-
-          if (!error) count++;
+          if (!error) imported++; else skipped++;
           processedItems++;
         }
-        results.restored.referrals = count;
-        await updateProgress();
+
+        report.stats.imported.referrals = imported;
+        report.stats.skipped.referrals = skipped;
       }
     }
 
-    // ----------------------------------------
-    // 7. WHATSAPP_TEMPLATES
-    // ----------------------------------------
-    if (shouldImport('whatsapp_templates')) {
-      const tableData = backup.data.whatsapp_templates || [];
-      if (tableData.length > 0) {
-        currentTable = 'whatsapp_templates';
-        console.log(`=== IMPORTANDO WHATSAPP_TEMPLATES (${tableData.length}) ===`);
-
-        let count = 0;
-        let skipped = 0;
-        for (const template of tableData) {
-          const sellerEmail = getSellerEmail(template);
-          const sellerId = getImportSellerId(template);
-          
-          if (!sellerId) { 
-            skipped++;
-            processedItems++; 
-            continue; 
-          }
-
-          const { data: inserted, error } = await supabase
-            .from('whatsapp_templates')
-            .insert({
-              seller_id: sellerId,
-              name: template.name,
-              type: template.type,
-              message: template.message,
-              is_default: template.is_default,
-            })
-            .select('id')
-            .single();
-
-          if (!error && inserted) {
-            templateNameToId.set(`${sellerEmail}|${template.name}`, inserted.id);
-            count++;
-          }
-          processedItems++;
-        }
-        results.restored.whatsapp_templates = count;
-        if (skipped > 0) results.skipped.whatsapp_templates = skipped;
-        await updateProgress();
-      }
-    }
-
-    // ----------------------------------------
-    // 8. BILLS_TO_PAY
-    // ----------------------------------------
-    if (shouldImport('bills_to_pay')) {
-      const tableData = backup.data.bills_to_pay || [];
-      if (tableData.length > 0) {
-        currentTable = 'bills_to_pay';
-        console.log(`=== IMPORTANDO BILLS_TO_PAY (${tableData.length}) ===`);
-
-        let count = 0;
-        for (const bill of tableData) {
-          const sellerId = getImportSellerId(bill);
-          if (!sellerId) { processedItems++; continue; }
-
-          const { error } = await supabase
-            .from('bills_to_pay')
-            .insert({
-              seller_id: sellerId,
-              description: bill.description,
-              amount: bill.amount || 0,
-              due_date: bill.due_date,
-              recipient_name: bill.recipient_name,
-              recipient_pix: bill.recipient_pix,
-              recipient_whatsapp: bill.recipient_whatsapp,
-              is_paid: bill.is_paid,
-              paid_at: bill.paid_at,
-              notes: bill.notes,
-            });
-
-          if (!error) count++;
-          processedItems++;
-        }
-        results.restored.bills_to_pay = count;
-        await updateProgress();
-      }
-    }
-
-    // ----------------------------------------
-    // 9. SHARED_PANELS
-    // ----------------------------------------
-    if (shouldImport('shared_panels')) {
-      const tableData = backup.data.shared_panels || [];
-      if (tableData.length > 0) {
-        currentTable = 'shared_panels';
-        console.log(`=== IMPORTANDO SHARED_PANELS (${tableData.length}) ===`);
-
-        let count = 0;
-        for (const panel of tableData) {
-          const sellerEmail = getSellerEmail(panel);
-          const sellerId = getImportSellerId(panel);
-          if (!sellerId) { processedItems++; continue; }
-
-          const { data: inserted, error } = await supabase
-            .from('shared_panels')
-            .insert({
-              seller_id: sellerId,
-              name: panel.name,
-              panel_type: panel.panel_type || 'unified',
-              monthly_cost: panel.monthly_cost || 0,
-              total_slots: panel.total_slots || 0,
-              used_slots: panel.used_slots || 0,
-              used_iptv_slots: panel.used_iptv_slots || 0,
-              used_p2p_slots: panel.used_p2p_slots || 0,
-              url: panel.url,
-              login: panel.login,
-              password: panel.password,
-              expires_at: panel.expires_at,
-              iptv_per_credit: panel.iptv_per_credit,
-              p2p_per_credit: panel.p2p_per_credit,
-              notes: panel.notes,
-              is_active: panel.is_active !== false,
-            })
-            .select('id')
-            .single();
-
-          if (!error && inserted) {
-            panelNameToId.set(`${sellerEmail}|${panel.name}`, inserted.id);
-            count++;
-          }
-          processedItems++;
-        }
-        results.restored.shared_panels = count;
-        await updateProgress();
-      }
-    }
-
-    // ----------------------------------------
-    // 10. PANEL_CLIENTS
-    // ----------------------------------------
+    // PANEL_CLIENTS
     if (shouldImport('panel_clients')) {
       const tableData = backup.data.panel_clients || [];
       if (tableData.length > 0) {
-        currentTable = 'panel_clients';
-        console.log(`=== IMPORTANDO PANEL_CLIENTS (${tableData.length}) ===`);
+        console.log(`\n[PANEL_CLIENTS] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
         for (const pc of tableData) {
           const sellerEmail = getSellerEmail(pc);
-          const sellerId = getImportSellerId(pc);
-          if (!sellerId) { processedItems++; continue; }
+          const sellerId = getSellerId(pc);
+          if (!sellerId) { skipped++; continue; }
 
-          let clientId = null;
-          let panelId = null;
+          const clientId = pc._client_identifier ? maps.clientKeyToId.get(`${sellerEmail}|${pc._client_identifier}`) : null;
+          const panelId = pc._panel_name ? maps.panelKeyToId.get(`${sellerEmail}|${pc._panel_name}`) : null;
 
-          if (pc._client_identifier) {
-            clientId = clientIdentifierToId.get(`${sellerEmail}|${pc._client_identifier}`);
-          }
-          if (pc._panel_name) {
-            panelId = panelNameToId.get(`${sellerEmail}|${pc._panel_name}`);
-          }
+          if (!clientId || !panelId) { skipped++; continue; }
 
-          if (!clientId || !panelId) { processedItems++; continue; }
-
-          const { error } = await supabase
-            .from('panel_clients')
-            .insert({
-              seller_id: sellerId,
-              client_id: clientId,
-              panel_id: panelId,
-              slot_type: pc.slot_type || 'iptv',
-              assigned_at: pc.assigned_at,
-            });
-
-          if (!error) count++;
-          processedItems++;
-        }
-        results.restored.panel_clients = count;
-        await updateProgress();
-      }
-    }
-
-    // ----------------------------------------
-    // 11. MESSAGE_HISTORY
-    // ----------------------------------------
-    if (shouldImport('message_history')) {
-      const tableData = backup.data.message_history || [];
-      if (tableData.length > 0) {
-        currentTable = 'message_history';
-        console.log(`=== IMPORTANDO MESSAGE_HISTORY (${tableData.length}) ===`);
-
-        let count = 0;
-        let skipped = 0;
-        const rows: any[] = [];
-
-        for (const msg of tableData) {
-          const sellerEmail = getSellerEmail(msg);
-          const sellerId = getImportSellerId(msg);
-          if (!sellerId) { skipped++; processedItems++; continue; }
-
-          let clientId = null;
-          let templateId = null;
-
-          if (msg._client_identifier) {
-            clientId = clientIdentifierToId.get(`${sellerEmail}|${msg._client_identifier}`);
-          }
-          if (msg._template_name) {
-            templateId = templateNameToId.get(`${sellerEmail}|${msg._template_name}`);
-          }
-
-          if (!clientId) { skipped++; processedItems++; continue; }
-
-          rows.push({
+          const { error } = await supabase.from('panel_clients').insert({
             seller_id: sellerId,
             client_id: clientId,
-            phone: msg.phone,
-            message_type: msg.message_type || 'manual',
-            message_content: msg.message_content,
-            template_id: templateId,
-            sent_at: msg.sent_at,
+            panel_id: panelId,
+            slot_type: pc.slot_type || 'iptv',
+            assigned_at: pc.assigned_at,
           });
+
+          if (!error) imported++; else skipped++;
+          processedItems++;
         }
 
-        // Inserir em batches
-        for (const chunk of chunkArray(rows, BATCH_SIZE)) {
-          const { data, error } = await supabase.from('message_history').insert(chunk).select('id');
-          if (!error && data) {
-            count += data.length;
-          } else if (error) {
-            // Fallback row-by-row
-            for (const row of chunk) {
-              const { error: rowError } = await supabase.from('message_history').insert(row);
-              if (!rowError) count++;
+        report.stats.imported.panel_clients = imported;
+        report.stats.skipped.panel_clients = skipped;
+      }
+    }
+
+    // MESSAGE_HISTORY
+    if (shouldImport('message_history')) {
+      const tableData: any[] = backup.data.message_history || [];
+      if (tableData.length > 0) {
+        console.log(`\n[MESSAGE_HISTORY] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
+
+        for (const chunk of chunkArray(tableData, BATCH_SIZE)) {
+          const rows: any[] = [];
+
+          for (const msg of chunk) {
+            const msgAny = msg as any;
+            const sellerEmail = getSellerEmail(msgAny);
+            const sellerId = getSellerId(msgAny);
+            if (!sellerId) { skipped++; continue; }
+
+            const clientId = msgAny._client_identifier ? maps.clientKeyToId.get(`${sellerEmail}|${msgAny._client_identifier}`) : null;
+            const templateId = msgAny._template_name ? maps.templateKeyToId.get(`${sellerEmail}|${msgAny._template_name}`) : null;
+
+            if (!clientId) { skipped++; continue; }
+
+            rows.push({
+              seller_id: sellerId,
+              client_id: clientId,
+              phone: msgAny.phone,
+              message_type: msgAny.message_type || 'manual',
+              message_content: msgAny.message_content,
+              template_id: templateId,
+              sent_at: msgAny.sent_at,
+            });
+          }
+
+          if (rows.length > 0) {
+            const { data, error } = await supabase.from('message_history').insert(rows).select('id');
+            if (!error && data) {
+              imported += data.length;
+            } else {
+              for (const row of rows) {
+                const { error: sErr } = await supabase.from('message_history').insert(row);
+                if (!sErr) imported++; else skipped++;
+              }
             }
           }
+
           processedItems += chunk.length;
-          await updateProgress();
         }
 
-        results.restored.message_history = count;
-        if (skipped > 0) results.skipped.message_history = skipped;
+        report.stats.imported.message_history = imported;
+        report.stats.skipped.message_history = skipped;
       }
     }
 
-    // ----------------------------------------
-    // 12. CLIENT_CATEGORIES
-    // ----------------------------------------
-    if (shouldImport('client_categories')) {
-      const tableData = backup.data.client_categories || [];
-      if (tableData.length > 0) {
-        currentTable = 'client_categories';
-        console.log(`=== IMPORTANDO CLIENT_CATEGORIES (${tableData.length}) ===`);
-
-        let count = 0;
-        for (const cat of tableData) {
-          const sellerId = getImportSellerId(cat);
-          if (!sellerId) { processedItems++; continue; }
-
-          const { error } = await supabase
-            .from('client_categories')
-            .insert({ seller_id: sellerId, name: cat.name });
-
-          if (!error) count++;
-          processedItems++;
-        }
-        results.restored.client_categories = count;
-        await updateProgress();
-      }
-    }
-
-    // ----------------------------------------
-    // 13. EXTERNAL_APPS
-    // ----------------------------------------
-    if (shouldImport('external_apps')) {
-      const tableData = backup.data.external_apps || [];
-      if (tableData.length > 0) {
-        currentTable = 'external_apps';
-        console.log(`=== IMPORTANDO EXTERNAL_APPS (${tableData.length}) ===`);
-
-        let count = 0;
-        for (const app of tableData) {
-          const sellerEmail = getSellerEmail(app);
-          const sellerId = getImportSellerId(app);
-          if (!sellerId) { processedItems++; continue; }
-
-          const { data: inserted, error } = await supabase
-            .from('external_apps')
-            .insert({
-              seller_id: sellerId,
-              name: app.name,
-              auth_type: app.auth_type || 'email_password',
-              price: app.price || 0,
-              cost: app.cost || 0,
-              website_url: app.website_url,
-              download_url: app.download_url,
-              is_active: app.is_active !== false,
-            })
-            .select('id')
-            .single();
-
-          if (!error && inserted) {
-            extAppNameToId.set(`${sellerEmail}|${app.name}`, inserted.id);
-            count++;
-          }
-          processedItems++;
-        }
-        results.restored.external_apps = count;
-        await updateProgress();
-      }
-    }
-
-    // ----------------------------------------
-    // 14. CLIENT_EXTERNAL_APPS
-    // ----------------------------------------
+    // CLIENT_EXTERNAL_APPS
     if (shouldImport('client_external_apps')) {
       const tableData = backup.data.client_external_apps || [];
       if (tableData.length > 0) {
-        currentTable = 'client_external_apps';
-        console.log(`=== IMPORTANDO CLIENT_EXTERNAL_APPS (${tableData.length}) ===`);
+        console.log(`\n[CLIENT_EXTERNAL_APPS] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
         for (const app of tableData) {
           const sellerEmail = getSellerEmail(app);
-          const sellerId = getImportSellerId(app);
-          if (!sellerId) { processedItems++; continue; }
+          const sellerId = getSellerId(app);
+          if (!sellerId) { skipped++; continue; }
 
-          let clientId = null;
-          let extAppId = null;
+          const clientId = app._client_identifier ? maps.clientKeyToId.get(`${sellerEmail}|${app._client_identifier}`) : null;
+          const extAppId = app._app_name ? maps.extAppKeyToId.get(`${sellerEmail}|${app._app_name}`) : null;
 
-          if (app._client_identifier) {
-            clientId = clientIdentifierToId.get(`${sellerEmail}|${app._client_identifier}`);
-          }
-          if (app._app_name) {
-            extAppId = extAppNameToId.get(`${sellerEmail}|${app._app_name}`);
-          }
+          if (!clientId || !extAppId) { skipped++; continue; }
 
-          if (!clientId || !extAppId) { processedItems++; continue; }
+          const { error } = await supabase.from('client_external_apps').insert({
+            seller_id: sellerId,
+            client_id: clientId,
+            external_app_id: extAppId,
+            email: app.email,
+            password: app.password,
+            expiration_date: app.expiration_date,
+            devices: app.devices,
+            notes: app.notes,
+          });
 
-          const { error } = await supabase
-            .from('client_external_apps')
-            .insert({
-              seller_id: sellerId,
-              client_id: clientId,
-              external_app_id: extAppId,
-              email: app.email,
-              password: app.password,
-              expiration_date: app.expiration_date,
-              devices: app.devices,
-              notes: app.notes,
-            });
-
-          if (!error) count++;
+          if (!error) imported++; else skipped++;
           processedItems++;
         }
-        results.restored.client_external_apps = count;
-        await updateProgress();
+
+        report.stats.imported.client_external_apps = imported;
+        report.stats.skipped.client_external_apps = skipped;
       }
     }
 
-    // ----------------------------------------
-    // 15. CLIENT_PREMIUM_ACCOUNTS
-    // ----------------------------------------
+    // CLIENT_PREMIUM_ACCOUNTS
     if (shouldImport('client_premium_accounts')) {
       const tableData = backup.data.client_premium_accounts || [];
       if (tableData.length > 0) {
-        currentTable = 'client_premium_accounts';
-        console.log(`=== IMPORTANDO CLIENT_PREMIUM_ACCOUNTS (${tableData.length}) ===`);
+        console.log(`\n[CLIENT_PREMIUM_ACCOUNTS] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
         for (const acc of tableData) {
           const sellerEmail = getSellerEmail(acc);
-          const sellerId = getImportSellerId(acc);
-          if (!sellerId) { processedItems++; continue; }
+          const sellerId = getSellerId(acc);
+          if (!sellerId) { skipped++; continue; }
 
-          let clientId = null;
+          const clientId = acc._client_identifier ? maps.clientKeyToId.get(`${sellerEmail}|${acc._client_identifier}`) : null;
+          if (!clientId) { skipped++; continue; }
 
-          if (acc._client_identifier) {
-            clientId = clientIdentifierToId.get(`${sellerEmail}|${acc._client_identifier}`);
-          }
+          const { error } = await supabase.from('client_premium_accounts').insert({
+            seller_id: sellerId,
+            client_id: clientId,
+            plan_name: acc.plan_name,
+            email: acc.email,
+            password: acc.password,
+            price: acc.price || 0,
+            expiration_date: acc.expiration_date,
+            notes: acc.notes,
+          });
 
-          if (!clientId) { processedItems++; continue; }
-
-          const { error } = await supabase
-            .from('client_premium_accounts')
-            .insert({
-              seller_id: sellerId,
-              client_id: clientId,
-              plan_name: acc.plan_name,
-              email: acc.email,
-              password: acc.password,
-              price: acc.price || 0,
-              expiration_date: acc.expiration_date,
-              notes: acc.notes,
-            });
-
-          if (!error) count++;
+          if (!error) imported++; else skipped++;
           processedItems++;
         }
-        results.restored.client_premium_accounts = count;
-        await updateProgress();
+
+        report.stats.imported.client_premium_accounts = imported;
+        report.stats.skipped.client_premium_accounts = skipped;
       }
     }
 
-    // ----------------------------------------
-    // 16. CUSTOM_PRODUCTS
-    // ----------------------------------------
-    if (shouldImport('custom_products')) {
-      const tableData = backup.data.custom_products || [];
+    // SERVER_APPS
+    if (shouldImport('server_apps')) {
+      const tableData = backup.data.server_apps || [];
       if (tableData.length > 0) {
-        currentTable = 'custom_products';
-        console.log(`=== IMPORTANDO CUSTOM_PRODUCTS (${tableData.length}) ===`);
+        console.log(`\n[SERVER_APPS] Importing ${tableData.length} records...`);
+        let imported = 0, skipped = 0;
 
-        let count = 0;
-        for (const product of tableData) {
-          const sellerId = getImportSellerId(product);
-          if (!sellerId) { processedItems++; continue; }
+        for (const app of tableData) {
+          const sellerEmail = getSellerEmail(app);
+          const sellerId = getSellerId(app);
+          if (!sellerId) { skipped++; continue; }
 
-          const { error } = await supabase
-            .from('custom_products')
-            .insert({
-              seller_id: sellerId,
-              name: product.name,
-              icon: product.icon,
-              download_url: product.download_url,
-              downloader_code: product.downloader_code,
-              is_active: product.is_active !== false,
-            });
+          const serverId = app._server_name ? maps.serverKeyToId.get(`${sellerEmail}|${app._server_name}`) : null;
+          if (!serverId) { skipped++; continue; }
 
-          if (!error) count++;
+          const { error } = await supabase.from('server_apps').insert({
+            seller_id: sellerId,
+            server_id: serverId,
+            name: app.name,
+            app_type: app.app_type || 'iptv',
+            download_url: app.download_url,
+            downloader_code: app.downloader_code,
+            website_url: app.website_url,
+            icon: app.icon,
+            notes: app.notes,
+            is_active: app.is_active !== false,
+          });
+
+          if (!error) imported++; else skipped++;
           processedItems++;
         }
-        results.restored.custom_products = count;
-        await updateProgress();
+
+        report.stats.imported.server_apps = imported;
+        report.stats.skipped.server_apps = skipped;
       }
     }
 
+    await updateJob({ progress: 90, restored: report.stats.imported });
+
     // ----------------------------------------
-    // 17. APP_SETTINGS
+    // 7. GLOBAL TABLES
     // ----------------------------------------
+    
+    // APP_SETTINGS
     if (shouldImport('app_settings')) {
       const tableData = backup.data.app_settings || [];
       if (tableData.length > 0) {
-        currentTable = 'app_settings';
-        console.log(`=== IMPORTANDO APP_SETTINGS (${tableData.length}) ===`);
+        console.log(`\n[APP_SETTINGS] Importing ${tableData.length} records...`);
+        let imported = 0;
 
-        let count = 0;
         for (const setting of tableData) {
           const { error } = await supabase
             .from('app_settings')
-            .upsert({
-              key: setting.key,
-              value: setting.value,
-              description: setting.description,
-            }, { onConflict: 'key' });
+            .upsert({ key: setting.key, value: setting.value, description: setting.description }, { onConflict: 'key' });
 
-          if (!error) count++;
+          if (!error) imported++;
           processedItems++;
         }
-        results.restored.app_settings = count;
-        await updateProgress();
+
+        report.stats.imported.app_settings = imported;
       }
     }
 
-    // ----------------------------------------
-    // 18. MONTHLY_PROFITS
-    // ----------------------------------------
-    if (shouldImport('monthly_profits')) {
-      const tableData = backup.data.monthly_profits || [];
-      if (tableData.length > 0) {
-        currentTable = 'monthly_profits';
-        console.log(`=== IMPORTANDO MONTHLY_PROFITS (${tableData.length}) ===`);
-
-        let count = 0;
-        for (const profit of tableData) {
-          const sellerId = getImportSellerId(profit);
-          if (!sellerId) { processedItems++; continue; }
-
-          const { error } = await supabase
-            .from('monthly_profits')
-            .insert({
-              seller_id: sellerId,
-              month: profit.month,
-              year: profit.year,
-              revenue: profit.revenue || 0,
-              server_costs: profit.server_costs || 0,
-              bills_costs: profit.bills_costs || 0,
-              net_profit: profit.net_profit || 0,
-              active_clients: profit.active_clients || 0,
-              closed_at: profit.closed_at,
-            });
-
-          if (!error) count++;
-          processedItems++;
-        }
-        results.restored.monthly_profits = count;
-        await updateProgress();
-      }
-    }
-
-    // ----------------------------------------
-    // 19. DEFAULT_SERVER_ICONS
-    // ----------------------------------------
+    // DEFAULT_SERVER_ICONS
     if (shouldImport('default_server_icons')) {
       const tableData = backup.data.default_server_icons || [];
       if (tableData.length > 0) {
-        currentTable = 'default_server_icons';
-        console.log(`=== IMPORTANDO DEFAULT_SERVER_ICONS (${tableData.length}) ===`);
+        console.log(`\n[DEFAULT_SERVER_ICONS] Importing ${tableData.length} records...`);
+        let imported = 0;
 
-        let count = 0;
         for (const icon of tableData) {
           const { error } = await supabase
             .from('default_server_icons')
@@ -1292,105 +1224,100 @@ serve(async (req) => {
               icon_url: icon.icon_url,
             }, { onConflict: 'name_normalized' });
 
-          if (!error) count++;
+          if (!error) imported++;
           processedItems++;
         }
-        results.restored.default_server_icons = count;
-        await updateProgress();
+
+        report.stats.imported.default_server_icons = imported;
       }
     }
 
-    // ----------------------------------------
-    // 20. SERVER_APPS
-    // ----------------------------------------
-    if (shouldImport('server_apps')) {
-      const tableData = backup.data.server_apps || [];
-      if (tableData.length > 0) {
-        currentTable = 'server_apps';
-        console.log(`=== IMPORTANDO SERVER_APPS (${tableData.length}) ===`);
+    // ============================================
+    // FASE 4: FINALIZAÇÃO E RELATÓRIO
+    // ============================================
+    report.phase = 'complete';
+    report.endTime = Date.now();
+    report.totalTimeMs = report.endTime - report.startTime;
 
-        let count = 0;
-        for (const app of tableData) {
-          const sellerEmail = getSellerEmail(app);
-          const sellerId = getImportSellerId(app);
-          if (!sellerId) { processedItems++; continue; }
+    // Determinar status
+    const totalImported = Object.values(report.stats.imported).reduce((a, b) => a + b, 0);
+    const totalExpected = Object.values(report.stats.expected).reduce((a, b) => a + b, 0);
+    const totalErrors = report.errorDetails.length;
 
-          let serverId = null;
-          if (app._server_name) {
-            serverId = serverNameToId.get(`${sellerEmail}|${app._server_name}`);
-          }
-
-          if (!serverId) { processedItems++; continue; }
-
-          const { error } = await supabase
-            .from('server_apps')
-            .insert({
-              seller_id: sellerId,
-              server_id: serverId,
-              name: app.name,
-              app_type: app.app_type || 'iptv',
-              download_url: app.download_url,
-              downloader_code: app.downloader_code,
-              website_url: app.website_url,
-              icon: app.icon,
-              notes: app.notes,
-              is_active: app.is_active !== false,
-            });
-
-          if (!error) count++;
-          processedItems++;
-        }
-        results.restored.server_apps = count;
-        await updateProgress();
-      }
+    if (totalErrors === 0 && totalImported === totalExpected) {
+      report.status = 'success';
+    } else if (totalImported > 0) {
+      report.status = 'partial_success';
+    } else {
+      report.status = 'failed';
     }
 
-    // ==========================================
-    // 8. FINALIZAÇÃO
-    // ==========================================
-    console.log('=== RESTORE CONCLUÍDO ===');
-    console.log('Restored:', results.restored);
-    console.log('Skipped:', results.skipped);
-    console.log('Errors:', results.errors.length);
+    console.log('\n=== IMPORT COMPLETE ===');
+    console.log(`Status: ${report.status}`);
+    console.log(`Time: ${report.totalTimeMs}ms`);
+    console.log(`Imported:`, report.stats.imported);
+    console.log(`Skipped:`, report.stats.skipped);
+    console.log(`Errors: ${totalErrors}`);
+    console.log(`Mappings:`, report.mappings);
 
-    // Atualizar job como concluído
-    if (jobId) {
-      await supabase
-        .from('backup_import_jobs')
-        .update({
-          status: 'completed',
-          progress: 100,
-          processed_items: processedItems,
-          total_items: totalItems,
-          restored: results.restored,
-          warnings: results.warnings,
-          errors: results.errors,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', jobId);
-    }
+    // Atualizar job final
+    await updateJob({
+      status: 'completed',
+      progress: 100,
+      processed_items: processedItems,
+      total_items: totalItems,
+      restored: report.stats.imported,
+      warnings: report.warnings,
+      errors: report.errorDetails.slice(0, 100).map(e => `[${e.table}] ${e.reason}`),
+    });
 
     return new Response(
       JSON.stringify({
-        success: true,
-        message: 'Restore concluído com sucesso',
-        format: 'v3 (clean-logical-keys)',
-        restored: results.restored,
-        skipped: results.skipped,
-        errors: results.errors,
-        warnings: results.warnings,
+        success: report.status !== 'failed',
+        message: report.status === 'success' 
+          ? 'Restore concluído com sucesso' 
+          : report.status === 'partial_success'
+            ? 'Restore concluído com alguns erros'
+            : 'Restore falhou',
+        report: {
+          status: report.status,
+          totalTimeMs: report.totalTimeMs,
+          expected: report.stats.expected,
+          imported: report.stats.imported,
+          skipped: report.stats.skipped,
+          errors: totalErrors,
+          errorDetails: report.errorDetails.slice(0, 50),
+          warnings: report.warnings,
+          mappings: report.mappings,
+        },
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-    console.error('=== ERRO FATAL ===', errorMessage);
-    
-    const fullError = await saveJobError(errorMessage, currentTable || undefined);
-    
+    console.error('=== FATAL ERROR ===', errorMessage);
+
+    report.endTime = Date.now();
+    report.totalTimeMs = report.endTime - report.startTime;
+    report.status = 'failed';
+
+    await updateJob({
+      status: 'failed',
+      errors: [errorMessage],
+    });
+
     return new Response(
-      JSON.stringify({ error: fullError }),
+      JSON.stringify({ 
+        error: `Erro fatal na fase "${report.phase}": ${errorMessage}`,
+        report: {
+          status: report.status,
+          phase: report.phase,
+          totalTimeMs: report.totalTimeMs,
+          imported: report.stats.imported,
+          errors: report.errorDetails.length,
+        },
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
