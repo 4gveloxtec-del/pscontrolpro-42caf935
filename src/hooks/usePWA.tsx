@@ -22,15 +22,28 @@ export function usePWA() {
   useEffect(() => {
     // Service worker registration is optional and non-blocking
     const registerSW = async () => {
-      if (!('serviceWorker' in navigator)) return;
+      // Skip SW registration in environments where it's not supported
+      if (!('serviceWorker' in navigator)) {
+        console.log('[PWA] Service workers not supported');
+        return;
+      }
       
       try {
+        // Check if we're in a context where SW registration makes sense
+        const isSecureContext = window.isSecureContext;
+        if (!isSecureContext) {
+          console.log('[PWA] Not a secure context, skipping SW registration');
+          return;
+        }
+        
         const reg = await navigator.serviceWorker.register('/sw.js', {
           // Don't block page load
-          updateViaCache: 'none'
+          updateViaCache: 'none',
+          scope: '/'
         });
         
         setRegistration(reg);
+        console.log('[PWA] Service worker registered successfully');
         
         // Non-blocking update check
         reg.addEventListener('updatefound', () => {
@@ -45,7 +58,9 @@ export function usePWA() {
         });
       } catch (error) {
         // SW registration failed - site continues to work normally
-        console.log('[PWA] Service worker registration skipped:', error);
+        // This is expected in some environments (e.g., when SW file is not found)
+        console.log('[PWA] Service worker registration skipped:', 
+          error instanceof Error ? error.message : 'Unknown error');
       }
     };
 
