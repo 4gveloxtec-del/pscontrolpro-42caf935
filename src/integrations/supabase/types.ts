@@ -1642,6 +1642,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          api_trial_started_at: string | null
           company_name: string | null
           created_at: string | null
           email: string
@@ -1660,6 +1661,7 @@ export type Database = {
           whatsapp: string | null
         }
         Insert: {
+          api_trial_started_at?: string | null
           company_name?: string | null
           created_at?: string | null
           email: string
@@ -1678,6 +1680,7 @@ export type Database = {
           whatsapp?: string | null
         }
         Update: {
+          api_trial_started_at?: string | null
           company_name?: string | null
           created_at?: string | null
           email?: string
