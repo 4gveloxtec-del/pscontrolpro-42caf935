@@ -190,6 +190,7 @@ export default function Clients() {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [serverFilter, setServerFilter] = useState<string>('all');
   const [dnsFilter, setDnsFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -1674,8 +1675,17 @@ export default function Clients() {
     const baseClients = filter === 'archived' ? archivedClients : activeClients;
     
     // Early return if no filters applied
-    if (!debouncedSearch.trim() && categoryFilter === 'all' && serverFilter === 'all' && dnsFilter === 'all' && filter === 'all') {
+    if (!debouncedSearch.trim() && categoryFilter === 'all' && serverFilter === 'all' && dnsFilter === 'all' && filter === 'all' && !dateFilter) {
       return baseClients;
+    }
+    
+    // If date filter is active, filter by expiration date first
+    let clientsToFilter = baseClients;
+    if (dateFilter) {
+      clientsToFilter = baseClients.filter(client => {
+        const clientExpDate = client.expiration_date.split('T')[0]; // Get just the date part
+        return clientExpDate === dateFilter;
+      });
     }
     
     // Normalize search text - remove accents and convert to lowercase
@@ -1691,7 +1701,7 @@ export default function Clients() {
     const normalizedSearch = normalizeText(rawSearch);
     const hasSearch = rawSearch.length > 0;
 
-    return baseClients.filter((client) => {
+    return clientsToFilter.filter((client) => {
       // Search filter - only apply if there's a search term
       if (hasSearch) {
         const normalizedName = normalizeText(client.name);
@@ -1765,7 +1775,7 @@ export default function Clients() {
           return true;
       }
     });
-  }, [activeClients, archivedClients, filter, debouncedSearch, categoryFilter, serverFilter, dnsFilter, decryptedCredentials, isSent, clientsWithPaidAppsSet]);
+  }, [activeClients, archivedClients, filter, debouncedSearch, categoryFilter, serverFilter, dnsFilter, dateFilter, decryptedCredentials, isSent, clientsWithPaidAppsSet]);
 
   // Sort clients: recently added (last 2 hours) appear at top, then by expiration
   const sortedClients = useMemo(() => {
@@ -2934,7 +2944,18 @@ export default function Clients() {
       </div>
 
       {/* Expiration Day Summary - Shows clients expiring in the next 5 days */}
-      <ExpirationDaySummary clients={clients} isPrivacyMode={isPrivacyMode} />
+      <ExpirationDaySummary 
+        clients={clients} 
+        isPrivacyMode={isPrivacyMode}
+        selectedDate={dateFilter}
+        onDateClick={(date) => {
+          setDateFilter(date);
+          // Reset to first page when filtering by date
+          if (date) {
+            goToPage(1);
+          }
+        }}
+      />
 
       {/* Clients Grid */}
       {isLoading ? (
