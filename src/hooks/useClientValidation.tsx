@@ -1,5 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { format, isValid, parseISO, isBefore, addDays } from 'date-fns';
+import { normalizeWhatsAppNumber } from '@/lib/utils';
 
 // Types
 interface ClientData {
@@ -55,20 +56,13 @@ function addLog(log: Omit<ValidationLog, 'timestamp'>) {
 
 // Utility functions for data normalization
 const normalizers = {
-  // Normalize phone number (remove non-digits, format Brazilian phone)
+  // Normalize phone number - always add +55 prefix for Brazilian numbers
   phone: (value: string | null | undefined): string | null => {
     if (!value) return null;
-    const digits = value.replace(/\D/g, '');
-    if (digits.length === 0) return null;
-    if (digits.length < 10) return digits; // Too short, return as-is
-    // Brazilian format: add country code if missing
-    if (digits.length === 11 && digits.startsWith('9')) {
-      return `55${digits}`;
-    }
-    if (digits.length === 10 || digits.length === 11) {
-      return digits;
-    }
-    return digits;
+    
+    // Use the centralized normalizer that adds +55
+    const normalized = normalizeWhatsAppNumber(value);
+    return normalized;
   },
 
   // Normalize name (trim, capitalize first letters)
