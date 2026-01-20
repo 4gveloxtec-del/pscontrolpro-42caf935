@@ -221,6 +221,19 @@ serve(async (req) => {
       );
     }
 
+    // Get MAC address - check gerencia_app_mac first, then from devices if available
+    let macAddress = client.gerencia_app_mac || '';
+    
+    // If no gerencia_app_mac, try to get from gerencia_app_devices array
+    if (!macAddress && client.gerencia_app_devices && Array.isArray(client.gerencia_app_devices)) {
+      const deviceMacs = client.gerencia_app_devices
+        .filter((d: { mac?: string }) => d && d.mac)
+        .map((d: { mac: string }) => d.mac);
+      if (deviceMacs.length > 0) {
+        macAddress = deviceMacs.join(', ');
+      }
+    }
+
     // Replace variables in message - using DECRYPTED values
     const message = replaceVariables(template.message, {
       nome: client.name,
@@ -235,6 +248,8 @@ serve(async (req) => {
       servidor: client.server_name || '',
       pix: sellerProfile?.pix_key || '',
       servico: client.category || 'IPTV',
+      dns: '',  // Remove DNS from message - always empty
+      mac: macAddress,  // Add MAC address
     });
 
     // Send welcome message
