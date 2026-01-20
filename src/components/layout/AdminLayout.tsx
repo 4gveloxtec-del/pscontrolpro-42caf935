@@ -28,6 +28,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/admin/dashboard', icon: LayoutDashboard },
   { label: 'Vendedores', href: '/admin/sellers', icon: Users },
+  { label: 'Chatbot', href: '/admin/chatbot', icon: MessageSquare },
   { label: 'Autocura', href: '/admin/system-health', icon: HeartPulse },
   { label: 'Relatórios', href: '/admin/reports', icon: FileText },
   { label: 'Backup', href: '/admin/backup', icon: Database },

@@ -47,6 +47,7 @@ const MessageHistory = lazy(() => import("./pages/MessageHistory"));
 const Tutorials = lazy(() => import("./pages/Tutorials"));
 const Chatbot = lazy(() => import("./pages/Chatbot"));
 const ChatbotLogs = lazy(() => import("./pages/ChatbotLogs"));
+const AdminChatbot = lazy(() => import("./pages/AdminChatbot"));
 const SystemHealth = lazy(() => import("./pages/SystemHealth"));
 const ForcePasswordUpdate = lazy(() => import("./pages/ForcePasswordUpdate"));
 const NotFound = lazy(() => import("./pages/NotFound"));
@@ -155,6 +156,7 @@ const AppRoutes = () => {
         }>
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/admin/sellers" element={<Sellers />} />
+          <Route path="/admin/chatbot" element={<AdminChatbot />} />
           <Route path="/admin/reports" element={<Reports />} />
           <Route path="/admin/backup" element={<Backup />} />
           <Route path="/admin/server-icons" element={<ServerIcons />} />
