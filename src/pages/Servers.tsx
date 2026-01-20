@@ -452,12 +452,12 @@ export default function Servers() {
                   <TabsContent value="url" className="space-y-2 mt-3">
                     <Input
                       id="icon_url"
-                      type="url"
+                      type="text"
                       value={formData.icon_url}
                       onChange={(e) => setFormData({ ...formData, icon_url: e.target.value })}
-                      placeholder="https://exemplo.com/icone.png"
+                      placeholder="https://exemplo.com/icone.png ou /images/icone.png"
                     />
-                    <p className="text-xs text-muted-foreground">Cole o link de uma imagem</p>
+                    <p className="text-xs text-muted-foreground">Cole o link de uma imagem (URL ou caminho local)</p>
                   </TabsContent>
                   
                   <TabsContent value="generate" className="space-y-2 mt-3">
