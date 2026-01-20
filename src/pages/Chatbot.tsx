@@ -283,10 +283,6 @@ export default function Chatbot() {
     }
   };
 
-  const getWebhookUrl = () => {
-    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'kgtqnjhmwsvswhrczqaf';
-    return `https://${projectId}.supabase.co/functions/v1/chatbot-webhook`;
-  };
 
   if (isLoading) {
     return (
@@ -783,39 +779,6 @@ export default function Chatbot() {
                 {isSaving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
                 Salvar Configurações
               </Button>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Webhook da Evolution API</CardTitle>
-              <CardDescription>
-                Configure este webhook na sua instância da Evolution API para receber mensagens
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Input value={getWebhookUrl()} readOnly className="font-mono text-sm" />
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    navigator.clipboard.writeText(getWebhookUrl());
-                    toast.success('URL copiada!');
-                  }}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              <div className="bg-muted p-4 rounded-lg">
-                <h4 className="font-medium mb-2">Como configurar:</h4>
-                <ol className="list-decimal list-inside space-y-1 text-sm text-muted-foreground">
-                  <li>Acesse o painel da Evolution API</li>
-                  <li>Vá em Configurações da Instância → Webhook</li>
-                  <li>Cole a URL acima no campo de Webhook</li>
-                  <li>Habilite o evento <code>messages.upsert</code></li>
-                  <li>Salve as configurações</li>
-                </ol>
-              </div>
             </CardContent>
           </Card>
         </TabsContent>
