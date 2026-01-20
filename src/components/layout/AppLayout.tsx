@@ -291,7 +291,7 @@ export function AppLayout() {
         }}
       >
         <div className={cn(
-          "p-responsive animate-fade-in",
+          "p-responsive animate-fade-in min-h-full",
           isMobile ? "pb-4" : ""
         )}>
           <Outlet />

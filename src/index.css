@@ -396,6 +396,78 @@
     overflow-y: auto;
     overflow-x: hidden;
   }
+}
+
+/* ============================================
+   GLOBAL SCROLLBAR STYLES
+   Ensures visible scrollbar on desktop
+   and smooth touch scroll on mobile
+   ============================================ */
+
+/* Base scrollbar styles for all scrollable elements */
+html, body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Ensure main content areas are scrollable */
+main, [role="main"] {
+  overflow-y: visible;
+}
+
+/* Desktop scrollbar - always visible */
+@media (min-width: 768px) {
+  /* Custom scrollbar for webkit browsers (Chrome, Safari, Edge) */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.3);
+    border-radius: 5px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.4);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.6);
+  }
+
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) hsl(var(--muted) / 0.3);
+  }
+}
+
+/* Mobile - hide scrollbar but keep functionality */
+@media (max-width: 767px) {
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+
+  * {
+    scrollbar-width: none;
+  }
+}
+
+/* Utility class for scrollable containers */
+.scrollable-container {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@layer components {
 
   /* Card responsive */
   .card-responsive {

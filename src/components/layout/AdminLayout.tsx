@@ -49,7 +49,7 @@ export function AdminLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900">
+    <div className="min-h-screen bg-slate-900 overflow-y-auto">
       {/* Mobile Header */}
       <header className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-slate-800 border-b border-slate-700 px-4 py-3">
         <div className="flex items-center justify-between">
@@ -144,8 +144,8 @@ export function AdminLayout() {
       )}
 
       {/* Main Content */}
-      <main className="lg:pl-64 pt-16 lg:pt-0 min-h-screen">
-        <div className="p-4 lg:p-6">
+      <main className="lg:pl-64 pt-16 lg:pt-0 min-h-screen overflow-y-auto">
+        <div className="p-4 lg:p-6 min-h-full">
           <Outlet />
         </div>
       </main>
