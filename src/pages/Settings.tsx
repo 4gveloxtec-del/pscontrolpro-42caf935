@@ -673,14 +673,8 @@ export default function Settings() {
         <SettingSection title="Administração">
           <SettingItem
             icon={DollarSign}
-            title="Valor do Aplicativo"
-            description={`R$ ${appPrice},00/mês`}
-            onClick={() => setShowPriceSettings(true)}
-          />
-          <SettingItem
-            icon={Calendar}
-            title="Dias de Teste"
-            description={`${trialDays} dias para novos revendedores`}
+            title="Planos e Configurações"
+            description="Preços, teste grátis e API"
             onClick={() => setShowTrialSettings(true)}
           />
           <SettingItem

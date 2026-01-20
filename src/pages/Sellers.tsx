@@ -258,17 +258,18 @@ export default function Sellers() {
     enabled: !!session?.user?.id,
   });
 
-  // Fetch app monthly price
-  const { data: appPrice } = useQuery({
-    queryKey: ['app-monthly-price'],
+  // Fetch plan prices - centralized from app_settings
+  const { data: planPrices } = useQuery({
+    queryKey: ['plan-prices'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('app_settings')
-        .select('value')
-        .eq('key', 'app_monthly_price')
-        .single();
-      if (error) return '25';
-      return data?.value || '25';
+        .select('key, value')
+        .in('key', ['manual_plan_price', 'automatic_plan_price']);
+      if (error) return { manual: '20', automatic: '35' };
+      const manual = data?.find(s => s.key === 'manual_plan_price')?.value || '20';
+      const automatic = data?.find(s => s.key === 'automatic_plan_price')?.value || '35';
+      return { manual, automatic };
     },
   });
 
@@ -446,6 +447,11 @@ export default function Sellers() {
       ? format(new Date(seller.subscription_expires_at), "dd/MM/yyyy")
       : 'Não definido';
     
+    // Use the plan-specific price based on seller's plan type
+    const sellerPrice = seller.plan_type === 'automatic' 
+      ? planPrices?.automatic || '35'
+      : planPrices?.manual || '20';
+    
     return template
       .replace(/{nome}/g, seller.full_name || seller.email.split('@')[0])
       .replace(/{email}/g, seller.email)
@@ -453,7 +459,7 @@ export default function Sellers() {
       .replace(/{vencimento}/g, expirationDate)
       .replace(/{pix}/g, adminProfile?.pix_key || 'Não configurado')
       .replace(/{empresa}/g, adminProfile?.company_name || '')
-      .replace(/{valor}/g, `R$ ${appPrice || '25'},00`);
+      .replace(/{valor}/g, `R$ ${sellerPrice},00`);
   };
 
   const handleOpenMessageDialog = (seller: Seller) => {

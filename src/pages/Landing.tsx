@@ -81,20 +81,22 @@ const automationHighlights = [
 export default function Landing() {
   const navigate = useNavigate();
 
-  // Fetch dynamic app settings from database
+  // Fetch dynamic app settings from database - centralized source of truth
   const { data: appSettings } = useQuery({
     queryKey: ['app-settings-landing'],
     queryFn: async () => {
       const { data } = await supabase
         .from('app_settings')
         .select('key, value')
-        .in('key', ['app_monthly_price', 'seller_trial_days']);
+        .in('key', ['manual_plan_price', 'automatic_plan_price', 'seller_trial_days']);
       return data || [];
     },
-    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+    staleTime: 1000 * 60 * 2, // Cache for 2 minutes for faster sync
   });
 
-  const appPrice = appSettings?.find(s => s.key === 'app_monthly_price')?.value || '25';
+  // Centralized prices from admin settings
+  const manualPlanPrice = appSettings?.find(s => s.key === 'manual_plan_price')?.value || '20';
+  const automaticPlanPrice = appSettings?.find(s => s.key === 'automatic_plan_price')?.value || '35';
   const trialDays = appSettings?.find(s => s.key === 'seller_trial_days')?.value || '5';
 
   const features = [
@@ -375,16 +377,30 @@ export default function Landing() {
               <ArrowRight className="h-5 w-5" />
             </Button>
             
-            {/* Pricing Badge */}
-            <div className="inline-flex flex-col items-center gap-1 p-4 rounded-2xl bg-card border border-border shadow-lg">
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl sm:text-4xl font-bold text-primary">R$ {appPrice || '25'}</span>
-                <span className="text-muted-foreground">/mês</span>
+            {/* Pricing Badges - Both Plans */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              {/* Manual Plan */}
+              <div className="inline-flex flex-col items-center gap-1 p-4 rounded-2xl bg-card border border-border shadow-lg">
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Plano Manual</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl sm:text-3xl font-bold text-foreground">R$ {manualPlanPrice}</span>
+                  <span className="text-muted-foreground">/mês</span>
+                </div>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Teste grátis por {trialDays} dias • Cancele quando quiser
-              </p>
+              
+              {/* Automatic Plan - Featured */}
+              <div className="inline-flex flex-col items-center gap-1 p-4 rounded-2xl bg-primary/5 border border-primary/30 shadow-lg">
+                <span className="text-xs font-medium text-primary uppercase tracking-wide">Plano Automático</span>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl sm:text-3xl font-bold text-primary">R$ {automaticPlanPrice}</span>
+                  <span className="text-muted-foreground">/mês</span>
+                </div>
+              </div>
             </div>
+            
+            <p className="text-sm text-muted-foreground">
+              Teste grátis por {trialDays} dias • Cancele quando quiser
+            </p>
           </div>
         </div>
       </section>

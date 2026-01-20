@@ -6,8 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
-import { Save, Calendar, Clock, MessageSquare, Info } from 'lucide-react';
+import { Save, Calendar, Clock, MessageSquare, Info, DollarSign, Zap, Settings2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface AdminTrialSettingsProps {
   onBack: () => void;
@@ -15,18 +16,30 @@ interface AdminTrialSettingsProps {
 
 export function AdminTrialSettings({ onBack }: AdminTrialSettingsProps) {
   const queryClient = useQueryClient();
+  
+  // Trial settings
   const [trialDays, setTrialDays] = useState('5');
   const [trialApiEnabled, setTrialApiEnabled] = useState(false);
   const [trialApiHours, setTrialApiHours] = useState('24');
+  
+  // Plan prices
+  const [manualPlanPrice, setManualPlanPrice] = useState('20');
+  const [automaticPlanPrice, setAutomaticPlanPrice] = useState('35');
 
   // Fetch current settings
   const { data: settings, isLoading } = useQuery({
-    queryKey: ['trial-settings'],
+    queryKey: ['admin-central-settings'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('app_settings')
         .select('key, value')
-        .in('key', ['seller_trial_days', 'trial_api_enabled', 'trial_api_hours']);
+        .in('key', [
+          'seller_trial_days', 
+          'trial_api_enabled', 
+          'trial_api_hours',
+          'manual_plan_price',
+          'automatic_plan_price'
+        ]);
       if (error) throw error;
       return data || [];
     },
@@ -43,6 +56,12 @@ export function AdminTrialSettings({ onBack }: AdminTrialSettingsProps) {
 
       const apiHours = settings.find(s => s.key === 'trial_api_hours')?.value;
       if (apiHours) setTrialApiHours(apiHours);
+      
+      const manualPrice = settings.find(s => s.key === 'manual_plan_price')?.value;
+      if (manualPrice) setManualPlanPrice(manualPrice);
+      
+      const autoPrice = settings.find(s => s.key === 'automatic_plan_price')?.value;
+      if (autoPrice) setAutomaticPlanPrice(autoPrice);
     }
   }, [settings]);
 
@@ -50,25 +69,34 @@ export function AdminTrialSettings({ onBack }: AdminTrialSettingsProps) {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const updates = [
-        { key: 'seller_trial_days', value: trialDays },
-        { key: 'trial_api_enabled', value: String(trialApiEnabled) },
-        { key: 'trial_api_hours', value: trialApiHours },
+        { key: 'seller_trial_days', value: trialDays, description: 'Dias de teste grátis para novos revendedores' },
+        { key: 'trial_api_enabled', value: String(trialApiEnabled), description: 'API liberada durante teste' },
+        { key: 'trial_api_hours', value: trialApiHours, description: 'Horas de uso da API durante teste' },
+        { key: 'manual_plan_price', value: manualPlanPrice, description: 'Valor mensal do Plano Manual' },
+        { key: 'automatic_plan_price', value: automaticPlanPrice, description: 'Valor mensal do Plano Automático' },
       ];
 
       for (const update of updates) {
         const { error } = await supabase
           .from('app_settings')
           .upsert(
-            { key: update.key, value: update.value, updated_at: new Date().toISOString() },
+            { 
+              key: update.key, 
+              value: update.value, 
+              description: update.description,
+              updated_at: new Date().toISOString() 
+            },
             { onConflict: 'key' }
           );
         if (error) throw error;
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['trial-settings'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-central-settings'] });
       queryClient.invalidateQueries({ queryKey: ['app-settings'] });
-      toast.success('Configurações de teste salvas com sucesso!');
+      queryClient.invalidateQueries({ queryKey: ['app-settings-landing'] });
+      queryClient.invalidateQueries({ queryKey: ['trial-settings'] });
+      toast.success('Configurações salvas com sucesso!');
     },
     onError: (error: Error) => {
       toast.error(`Erro ao salvar: ${error.message}`);
@@ -89,111 +117,185 @@ export function AdminTrialSettings({ onBack }: AdminTrialSettingsProps) {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-lg mx-auto">
+    <div className="space-y-6 animate-fade-in max-w-2xl mx-auto">
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="sm" onClick={onBack}>
           ← Voltar
         </Button>
-        <h1 className="text-xl font-bold">Configurações de Teste Grátis</h1>
+        <div>
+          <h1 className="text-xl font-bold">Central de Configurações</h1>
+          <p className="text-sm text-muted-foreground">Planos, preços e teste grátis</p>
+        </div>
       </div>
 
       <Alert>
         <Info className="h-4 w-4" />
         <AlertDescription>
-          Configure o período de teste grátis e o acesso à WhatsApp API durante o teste.
-          Alterações aqui afetam todos os novos revendedores.
+          Alterações aqui são aplicadas <strong>imediatamente</strong> na landing page e em novos cadastros.
+          Revendedores já cadastrados não são afetados retroativamente.
         </AlertDescription>
       </Alert>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Trial Duration */}
-        <div className="bg-card rounded-xl border border-border p-4 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-              <Calendar className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-medium">Duração do Teste</h3>
-              <p className="text-sm text-muted-foreground">Período de teste para novos revendedores</p>
-            </div>
-          </div>
+        <Tabs defaultValue="plans" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="plans" className="gap-2">
+              <DollarSign className="h-4 w-4" />
+              Planos e Preços
+            </TabsTrigger>
+            <TabsTrigger value="trial" className="gap-2">
+              <Calendar className="h-4 w-4" />
+              Teste Grátis
+            </TabsTrigger>
+          </TabsList>
 
-          <div className="space-y-2">
-            <Label htmlFor="trial_days">Dias de Teste Grátis</Label>
-            <Input
-              id="trial_days"
-              type="number"
-              value={trialDays}
-              onChange={(e) => setTrialDays(e.target.value)}
-              placeholder="5"
-              min="1"
-              max="30"
-              step="1"
-            />
-            <p className="text-xs text-muted-foreground">
-              Novos revendedores terão {trialDays} dias de acesso gratuito ao sistema
-            </p>
-          </div>
-        </div>
+          {/* Plans Tab */}
+          <TabsContent value="plans" className="space-y-4 mt-4">
+            {/* Manual Plan */}
+            <div className="bg-card rounded-xl border border-border p-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center">
+                  <Settings2 className="h-5 w-5 text-blue-500" />
+                </div>
+                <div>
+                  <h3 className="font-medium">Plano Manual</h3>
+                  <p className="text-sm text-muted-foreground">Apenas gestão de clientes, envios via app externo</p>
+                </div>
+              </div>
 
-        {/* WhatsApp API During Trial */}
-        <div className="bg-card rounded-xl border border-border p-4 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center">
-              <MessageSquare className="h-5 w-5 text-success" />
+              <div className="space-y-2">
+                <Label htmlFor="manual_price">Valor Mensal (R$)</Label>
+                <Input
+                  id="manual_price"
+                  type="number"
+                  value={manualPlanPrice}
+                  onChange={(e) => setManualPlanPrice(e.target.value)}
+                  placeholder="20"
+                  min="0"
+                  step="1"
+                />
+              </div>
             </div>
-            <div>
-              <h3 className="font-medium">WhatsApp API no Teste</h3>
-              <p className="text-sm text-muted-foreground">Controle de uso da API durante o período de teste</p>
-            </div>
-          </div>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-sm">Liberar API no Teste</p>
-              <p className="text-xs text-muted-foreground">
-                {trialApiEnabled 
-                  ? 'Revendedores em teste podem usar a API por tempo limitado' 
-                  : 'API bloqueada durante o teste grátis'}
-              </p>
-            </div>
-            <Switch
-              checked={trialApiEnabled}
-              onCheckedChange={setTrialApiEnabled}
-            />
-          </div>
+            {/* Automatic Plan */}
+            <div className="bg-card rounded-xl border border-primary/30 p-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Zap className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-medium">Plano Automático</h3>
+                  <p className="text-sm text-muted-foreground">Gestão + WhatsApp API + Chatbot + Automação</p>
+                </div>
+              </div>
 
-          {trialApiEnabled && (
-            <div className="space-y-2 pt-2 border-t border-border">
-              <Label htmlFor="trial_api_hours" className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                Horas de Uso da API
-              </Label>
-              <Input
-                id="trial_api_hours"
-                type="number"
-                value={trialApiHours}
-                onChange={(e) => setTrialApiHours(e.target.value)}
-                placeholder="24"
-                min="1"
-                max="168"
-                step="1"
-              />
-              <p className="text-xs text-muted-foreground">
-                Após {trialApiHours} horas de uso, a API será automaticamente bloqueada.
-                O revendedor poderá continuar usando o sistema no modo manual.
-              </p>
+              <div className="space-y-2">
+                <Label htmlFor="automatic_price">Valor Mensal (R$)</Label>
+                <Input
+                  id="automatic_price"
+                  type="number"
+                  value={automaticPlanPrice}
+                  onChange={(e) => setAutomaticPlanPrice(e.target.value)}
+                  placeholder="35"
+                  min="0"
+                  step="1"
+                />
+              </div>
             </div>
-          )}
-        </div>
+          </TabsContent>
+
+          {/* Trial Tab */}
+          <TabsContent value="trial" className="space-y-4 mt-4">
+            {/* Trial Duration */}
+            <div className="bg-card rounded-xl border border-border p-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Calendar className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-medium">Duração do Teste</h3>
+                  <p className="text-sm text-muted-foreground">Período de teste para novos revendedores</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="trial_days">Dias de Teste Grátis</Label>
+                <Input
+                  id="trial_days"
+                  type="number"
+                  value={trialDays}
+                  onChange={(e) => setTrialDays(e.target.value)}
+                  placeholder="5"
+                  min="1"
+                  max="30"
+                  step="1"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Novos revendedores terão {trialDays} dias de acesso gratuito ao sistema
+                </p>
+              </div>
+            </div>
+
+            {/* WhatsApp API During Trial */}
+            <div className="bg-card rounded-xl border border-border p-4 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center">
+                  <MessageSquare className="h-5 w-5 text-success" />
+                </div>
+                <div>
+                  <h3 className="font-medium">WhatsApp API no Teste</h3>
+                  <p className="text-sm text-muted-foreground">Controle de uso da API durante o período de teste</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-sm">Liberar API no Teste</p>
+                  <p className="text-xs text-muted-foreground">
+                    {trialApiEnabled 
+                      ? 'Revendedores em teste podem usar a API por tempo limitado' 
+                      : 'API bloqueada durante o teste grátis'}
+                  </p>
+                </div>
+                <Switch
+                  checked={trialApiEnabled}
+                  onCheckedChange={setTrialApiEnabled}
+                />
+              </div>
+
+              {trialApiEnabled && (
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <Label htmlFor="trial_api_hours" className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    Horas de Uso da API
+                  </Label>
+                  <Input
+                    id="trial_api_hours"
+                    type="number"
+                    value={trialApiHours}
+                    onChange={(e) => setTrialApiHours(e.target.value)}
+                    placeholder="24"
+                    min="1"
+                    max="168"
+                    step="1"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Após {trialApiHours} horas de uso, a API será automaticamente bloqueada.
+                  </p>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+        </Tabs>
 
         {/* Summary */}
         <div className="bg-muted/50 rounded-xl p-4 space-y-2">
           <h4 className="font-medium text-sm">Resumo da Configuração</h4>
           <ul className="text-xs text-muted-foreground space-y-1">
-            <li>• Novos revendedores: <strong>{trialDays} dias</strong> de teste grátis</li>
-            <li>• WhatsApp API: <strong>{trialApiEnabled ? `Liberada por ${trialApiHours}h` : 'Bloqueada'}</strong> durante o teste</li>
-            <li>• Após o teste: {trialApiEnabled ? 'API bloqueada, sistema em modo manual' : 'Sistema permanece em modo manual'}</li>
+            <li>• Plano Manual: <strong>R$ {manualPlanPrice}/mês</strong></li>
+            <li>• Plano Automático: <strong>R$ {automaticPlanPrice}/mês</strong></li>
+            <li>• Teste grátis: <strong>{trialDays} dias</strong></li>
+            <li>• WhatsApp API no teste: <strong>{trialApiEnabled ? `Liberada por ${trialApiHours}h` : 'Bloqueada'}</strong></li>
           </ul>
         </div>
 
@@ -203,7 +305,7 @@ export function AdminTrialSettings({ onBack }: AdminTrialSettingsProps) {
           disabled={saveMutation.isPending}
         >
           <Save className="h-4 w-4 mr-2" />
-          {saveMutation.isPending ? 'Salvando...' : 'Salvar Configurações'}
+          {saveMutation.isPending ? 'Salvando...' : 'Salvar Todas as Configurações'}
         </Button>
       </form>
     </div>
