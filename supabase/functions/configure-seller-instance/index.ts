@@ -544,6 +544,7 @@ serve(async (req) => {
             webhook_configured: instance.webhook_auto_configured,
             blocked: instance.instance_blocked,
             auto_send_enabled: instance.auto_send_enabled,
+            connected_phone: instance.connected_phone || null,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );

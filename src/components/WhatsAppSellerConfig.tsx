@@ -570,6 +570,11 @@ export function WhatsAppSellerConfig() {
                 ? `Instância ${formData.instance_name || 'ativa'} pronta para envios` 
                 : 'Configure e escaneie o QR Code para conectar'}
             </p>
+            {formData.is_connected && instance?.connected_phone && (
+              <p className="text-sm font-medium text-green-600 dark:text-green-400 mt-1">
+                📱 Número: <strong>{instance.connected_phone}</strong>
+              </p>
+            )}
           </div>
           <Button
             variant="ghost"

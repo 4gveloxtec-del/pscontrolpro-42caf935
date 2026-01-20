@@ -20,6 +20,7 @@ interface WhatsAppSellerInstance {
   session_valid?: boolean;
   last_evolution_state?: string | null;
   webhook_auto_configured?: boolean;
+  connected_phone?: string | null;
 }
 
 export function useWhatsAppSellerInstance() {

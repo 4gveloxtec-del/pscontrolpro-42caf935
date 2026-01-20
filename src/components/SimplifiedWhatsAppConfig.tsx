@@ -33,6 +33,7 @@ interface InstanceStatus {
   auto_send_enabled?: boolean;
   last_heartbeat?: string;
   evolution_state?: string;
+  connected_phone?: string;
 }
 
 export function SimplifiedWhatsAppConfig() {
@@ -404,8 +405,13 @@ export function SimplifiedWhatsAppConfig() {
                 <Smartphone className="h-5 w-5" />
                 Sua Instância WhatsApp
               </CardTitle>
-              <CardDescription>
-                Instância: <strong>{status.instance_name}</strong>
+              <CardDescription className="space-y-1">
+                <span>Instância: <strong>{status.instance_name}</strong></span>
+                {status.connected_phone && status.is_connected && (
+                  <span className="block text-green-600 dark:text-green-400 font-medium">
+                    📱 Número conectado: <strong>{status.connected_phone}</strong>
+                  </span>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
