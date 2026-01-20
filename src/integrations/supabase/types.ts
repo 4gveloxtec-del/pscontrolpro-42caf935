@@ -97,6 +97,7 @@ export type Database = {
           created_at: string | null
           icon: string | null
           id: string
+          image_url: string | null
           is_active: boolean | null
           node_key: string
           options: Json | null
@@ -111,6 +112,7 @@ export type Database = {
           created_at?: string | null
           icon?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           node_key: string
           options?: Json | null
@@ -125,6 +127,7 @@ export type Database = {
           created_at?: string | null
           icon?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           node_key?: string
           options?: Json | null
@@ -203,6 +206,7 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          image_url: string | null
           is_active: boolean | null
           is_exact_match: boolean | null
           keyword: string
@@ -212,6 +216,7 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           is_exact_match?: boolean | null
           keyword: string
@@ -221,6 +226,7 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           is_exact_match?: boolean | null
           keyword?: string
@@ -745,6 +751,7 @@ export type Database = {
           cooldown_mode: string | null
           created_at: string | null
           id: string
+          image_url: string | null
           is_active: boolean | null
           is_global_trigger: boolean | null
           name: string
@@ -762,6 +769,7 @@ export type Database = {
           cooldown_mode?: string | null
           created_at?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           is_global_trigger?: boolean | null
           name: string
@@ -779,6 +787,7 @@ export type Database = {
           cooldown_mode?: string | null
           created_at?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           is_global_trigger?: boolean | null
           name?: string
@@ -931,6 +940,7 @@ export type Database = {
           created_by: string
           description: string | null
           id: string
+          image_url: string | null
           is_active: boolean | null
           name: string
           response_content: Json
@@ -948,6 +958,7 @@ export type Database = {
           created_by: string
           description?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           name: string
           response_content?: Json
@@ -965,6 +976,7 @@ export type Database = {
           created_by?: string
           description?: string | null
           id?: string
+          image_url?: string | null
           is_active?: boolean | null
           name?: string
           response_content?: Json

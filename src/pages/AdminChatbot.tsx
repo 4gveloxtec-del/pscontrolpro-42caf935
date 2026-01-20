@@ -117,8 +117,8 @@ export default function AdminChatbot() {
 
   // Keywords state
   const [showKeywordDialog, setShowKeywordDialog] = useState(false);
-  const [editingKeyword, setEditingKeyword] = useState<{ id: string; keyword: string; response_text: string; is_active: boolean } | null>(null);
-  const [keywordForm, setKeywordForm] = useState({ keyword: '', response_text: '', is_active: true });
+  const [editingKeyword, setEditingKeyword] = useState<{ id: string; keyword: string; response_text: string; is_active: boolean; image_url?: string } | null>(null);
+  const [keywordForm, setKeywordForm] = useState({ keyword: '', response_text: '', is_active: true, image_url: '' });
 
   // Parse settings from app_settings
   useEffect(() => {
@@ -149,7 +149,8 @@ export default function AdminChatbot() {
         .update({ 
           keyword: keywordForm.keyword, 
           response_text: keywordForm.response_text, 
-          is_active: keywordForm.is_active 
+          is_active: keywordForm.is_active,
+          image_url: keywordForm.image_url || null 
         })
         .eq('id', editingKeyword.id);
     } else {
@@ -158,13 +159,14 @@ export default function AdminChatbot() {
         .insert({ 
           keyword: keywordForm.keyword, 
           response_text: keywordForm.response_text, 
-          is_active: keywordForm.is_active 
+          is_active: keywordForm.is_active,
+          image_url: keywordForm.image_url || null 
         });
     }
 
     setShowKeywordDialog(false);
     setEditingKeyword(null);
-    setKeywordForm({ keyword: '', response_text: '', is_active: true });
+    setKeywordForm({ keyword: '', response_text: '', is_active: true, image_url: '' });
     refetchKeywords();
   };
 
@@ -200,7 +202,8 @@ export default function AdminChatbot() {
     response_type: 'text' as 'menu' | 'text',
     icon: '📋',
     is_active: true,
-    options: [] as ChatbotOption[]
+    options: [] as ChatbotOption[],
+    image_url: ''
   });
 
   // Fetch WhatsApp templates
@@ -340,7 +343,8 @@ export default function AdminChatbot() {
       response_type: 'text',
       icon: '📋',
       is_active: true,
-      options: []
+      options: [],
+      image_url: ''
     });
     setEditingNode(null);
   };
@@ -355,7 +359,8 @@ export default function AdminChatbot() {
       response_type: node.response_type,
       icon: node.icon,
       is_active: node.is_active,
-      options: node.options || []
+      options: node.options || [],
+      image_url: (node as any).image_url || ''
     });
     setShowNodeDialog(true);
   };
@@ -383,7 +388,8 @@ export default function AdminChatbot() {
         response_type: nodeForm.response_type,
         icon: nodeForm.icon,
         is_active: nodeForm.is_active,
-        options: nodeForm.options
+        options: nodeForm.options,
+        image_url: nodeForm.image_url || null
       });
     } else {
       await createNode({
@@ -395,7 +401,8 @@ export default function AdminChatbot() {
         icon: nodeForm.icon,
         is_active: nodeForm.is_active,
         options: nodeForm.options,
-        sort_order: nodes.length
+        sort_order: nodes.length,
+        image_url: nodeForm.image_url || null
       });
     }
 
@@ -491,7 +498,8 @@ export default function AdminChatbot() {
                     { key: '1', label: 'Conhecer os Planos', target: 'planos' },
                     { key: '2', label: 'Teste Grátis', target: 'teste' },
                     { key: '3', label: 'Suporte', target: 'suporte' }
-                  ]
+                  ],
+                  image_url: ''
                 });
                 setShowNodeDialog(true);
               }}
@@ -1122,7 +1130,7 @@ export default function AdminChatbot() {
                   <Button 
                     onClick={() => {
                       setEditingKeyword(null);
-                      setKeywordForm({ keyword: '', response_text: '', is_active: true });
+                      setKeywordForm({ keyword: '', response_text: '', is_active: true, image_url: '' });
                       setShowKeywordDialog(true);
                     }}
                     className="bg-blue-600 hover:bg-blue-700"
@@ -1159,8 +1167,8 @@ export default function AdminChatbot() {
                               size="icon"
                               className="h-7 w-7 text-slate-400"
                               onClick={() => {
-                                setEditingKeyword(kw);
-                                setKeywordForm({ keyword: kw.keyword, response_text: kw.response_text, is_active: kw.is_active });
+                                setEditingKeyword({ ...kw, image_url: kw.image_url || '' });
+                                setKeywordForm({ keyword: kw.keyword, response_text: kw.response_text, is_active: kw.is_active, image_url: kw.image_url || '' });
                                 setShowKeywordDialog(true);
                               }}
                             >
@@ -1218,6 +1226,17 @@ export default function AdminChatbot() {
                 className="bg-slate-700 border-slate-600 min-h-[100px]"
               />
               <p className="text-xs text-slate-500">Use *texto* para negrito. Digite ***** (asterisco) em negrito para voltar ao menu.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>🖼️ Link da Imagem (opcional)</Label>
+              <Input
+                value={keywordForm.image_url}
+                onChange={(e) => setKeywordForm(prev => ({ ...prev, image_url: e.target.value }))}
+                placeholder="https://exemplo.com/imagem.jpg"
+                className="bg-slate-700 border-slate-600"
+              />
+              <p className="text-xs text-slate-500">Cole o link direto da imagem (JPG, PNG, GIF) que deseja exibir junto à mensagem</p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -1377,6 +1396,17 @@ export default function AdminChatbot() {
                 className="bg-slate-700 border-slate-600 min-h-[150px]"
               />
               <p className="text-xs text-slate-500">Use *texto* para negrito e links começando com https://</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>🖼️ Link da Imagem (opcional)</Label>
+              <Input
+                value={nodeForm.image_url}
+                onChange={(e) => setNodeForm(prev => ({ ...prev, image_url: e.target.value }))}
+                placeholder="https://exemplo.com/imagem.jpg"
+                className="bg-slate-700 border-slate-600"
+              />
+              <p className="text-xs text-slate-500">Cole o link direto da imagem (JPG, PNG, GIF) que deseja exibir junto à mensagem</p>
             </div>
 
             {nodeForm.response_type === 'menu' && (

@@ -427,11 +427,13 @@ async function processAdminChatbotMessage(
   );
 
   let responseMessage = "";
+  let responseImageUrl = "";
   let newNodeKey = contact.current_node_key || "inicial";
 
   if (matchedKeyword) {
     // Keyword match found - use keyword response
     responseMessage = matchedKeyword.response_text;
+    responseImageUrl = matchedKeyword.image_url || "";
     console.log("[AdminChatbot] Keyword match:", matchedKeyword.keyword);
   } else {
     // Process input through regular menu flow
@@ -442,6 +444,8 @@ async function processAdminChatbotMessage(
 
     if (result.nextNode) {
       newNodeKey = result.nextNode.node_key;
+      // Check if the node has an image
+      responseImageUrl = (result.nextNode as any).image_url || "";
     }
   }
 
@@ -460,8 +464,13 @@ async function processAdminChatbotMessage(
     await new Promise((resolve) => setTimeout(resolve, delay));
   }
 
-  // Send response
-  const sent = await sendTextMessage(globalConfig, instanceName, phone, responseMessage, supabase, undefined);
+  // Send response (with image if provided)
+  let sent = false;
+  if (responseImageUrl) {
+    sent = await sendImageMessage(globalConfig, instanceName, phone, responseMessage, responseImageUrl);
+  } else {
+    sent = await sendTextMessage(globalConfig, instanceName, phone, responseMessage, supabase, undefined);
+  }
 
   if (sent) {
     // Update contact

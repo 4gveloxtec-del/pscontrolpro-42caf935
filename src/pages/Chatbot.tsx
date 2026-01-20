@@ -947,7 +947,7 @@ export default function Chatbot() {
 
             {formData.response_type === 'text_image' && (
               <div>
-                <Label>URL da Imagem</Label>
+                <Label>🖼️ Link da Imagem</Label>
                 <Input
                   value={formData.response_content?.image_url || ''}
                   onChange={(e) => setFormData(prev => ({
@@ -956,6 +956,7 @@ export default function Chatbot() {
                   }))}
                   placeholder="https://exemplo.com/imagem.jpg"
                 />
+                <p className="text-xs text-muted-foreground mt-1">Cole o link direto da imagem (JPG, PNG, GIF) que deseja exibir junto à mensagem</p>
               </div>
             )}
 
