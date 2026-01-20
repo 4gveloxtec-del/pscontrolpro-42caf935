@@ -24,6 +24,7 @@ interface Seller {
   full_name: string | null;
   whatsapp: string | null;
   is_active: boolean;
+  is_permanent: boolean;
   plan_period: string | null;
   plan_type: string | null;
   subscription_expires_at: string | null;
@@ -51,11 +52,11 @@ interface WhatsAppTemplate {
 
 // Períodos de plano disponíveis
 const PLAN_PERIODS = [
-  { value: 'mensal', label: 'Mensal', days: 30 },
-  { value: 'trimestral', label: 'Trimestral', days: 90 },
-  { value: 'semestral', label: 'Semestral', days: 180 },
-  { value: 'anual', label: 'Anual', days: 365 },
-  { value: 'vitalicio', label: 'Vitalício', days: null },
+  { value: 'permanente', label: 'Permanente', days: null, aliases: ['vitalicio', 'permanent'] },
+  { value: 'mensal', label: 'Mensal', days: 30, aliases: ['monthly'] },
+  { value: 'trimestral', label: 'Trimestral', days: 90, aliases: ['quarterly'] },
+  { value: 'semestral', label: 'Semestral', days: 180, aliases: ['semiannual'] },
+  { value: 'anual', label: 'Anual', days: 365, aliases: ['annual', 'yearly'] },
 ];
 
 // Tipos de mensagem/categorias
@@ -99,7 +100,7 @@ export function AdminBroadcastResellers() {
 
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, full_name, whatsapp, is_active, plan_period, plan_type, subscription_expires_at')
+        .select('id, email, full_name, whatsapp, is_active, is_permanent, plan_period, plan_type, subscription_expires_at')
         .in('id', sellerIds)
         .not('whatsapp', 'is', null);
 
@@ -153,6 +154,50 @@ export function AdminBroadcastResellers() {
     });
   }, [templates, selectedCategory]);
 
+  // Helper function to normalize plan period to a standard value
+  const normalizePlanPeriod = (seller: Seller): string => {
+    // If seller is permanent, always return 'permanente'
+    if (seller.is_permanent) return 'permanente';
+    
+    // If plan_period is set, normalize it
+    if (seller.plan_period) {
+      const period = seller.plan_period.toLowerCase().trim();
+      
+      // Check against known aliases
+      if (['permanente', 'vitalicio', 'vitalício', 'permanent', 'lifetime'].includes(period)) {
+        return 'permanente';
+      }
+      if (['mensal', 'monthly', '30'].includes(period)) return 'mensal';
+      if (['trimestral', 'quarterly', '90'].includes(period)) return 'trimestral';
+      if (['semestral', 'semiannual', '180'].includes(period)) return 'semestral';
+      if (['anual', 'annual', 'yearly', '365'].includes(period)) return 'anual';
+      
+      // Return the normalized version if it matches a known period
+      return period;
+    }
+    
+    // Try to infer from subscription_expires_at if plan_period is not set
+    if (seller.subscription_expires_at) {
+      const expirationDate = new Date(seller.subscription_expires_at);
+      const now = new Date();
+      const createdDate = now; // We'd ideally use created_at but we don't have it here
+      
+      // Calculate total days of the plan based on remaining days
+      const daysRemaining = Math.ceil(
+        (expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      );
+      
+      // If more than 400 days, likely permanent
+      if (daysRemaining > 400) return 'permanente';
+      if (daysRemaining > 185) return 'anual';
+      if (daysRemaining > 95) return 'semestral';
+      if (daysRemaining > 35) return 'trimestral';
+      return 'mensal';
+    }
+    
+    return 'mensal'; // Default fallback
+  };
+
   // Filter sellers based on selected filters
   const filteredSellers = useMemo(() => {
     let filtered = allSellers;
@@ -160,11 +205,13 @@ export function AdminBroadcastResellers() {
     // Filter by active status
     if (statusFilter === 'active') {
       filtered = filtered.filter(s => {
+        if (s.is_permanent) return s.is_active;
         if (!s.subscription_expires_at) return s.is_active;
         return s.is_active && new Date(s.subscription_expires_at) > new Date();
       });
     } else if (statusFilter === 'expired') {
       filtered = filtered.filter(s => {
+        if (s.is_permanent) return false; // Permanent sellers never expire
         if (!s.subscription_expires_at) return false;
         return new Date(s.subscription_expires_at) <= new Date();
       });
@@ -176,21 +223,8 @@ export function AdminBroadcastResellers() {
     // Filter by selected plan periods
     if (selectedPeriods.length > 0) {
       filtered = filtered.filter(s => {
-        if (!s.plan_period) {
-          // Try to infer from subscription_expires_at if plan_period is not set
-          if (s.subscription_expires_at) {
-            const daysRemaining = Math.ceil(
-              (new Date(s.subscription_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-            );
-            
-            if (selectedPeriods.includes('mensal') && daysRemaining <= 35 && daysRemaining > 0) return true;
-            if (selectedPeriods.includes('trimestral') && daysRemaining <= 95 && daysRemaining > 35) return true;
-            if (selectedPeriods.includes('semestral') && daysRemaining <= 185 && daysRemaining > 95) return true;
-            if (selectedPeriods.includes('anual') && daysRemaining <= 370 && daysRemaining > 185) return true;
-          }
-          return false;
-        }
-        return selectedPeriods.includes(s.plan_period);
+        const normalizedPeriod = normalizePlanPeriod(s);
+        return selectedPeriods.includes(normalizedPeriod);
       });
     }
 
@@ -628,6 +662,51 @@ Qualquer dúvida estamos à disposição!`;
               </CardContent>
             </Card>
           </div>
+
+          {/* Filtered Sellers Preview */}
+          {selectedPeriods.length > 0 && (
+            <div className="space-y-2">
+              <Label className="flex items-center justify-between">
+                <span>Revendedores Selecionados ({filteredSellers.length})</span>
+                {filteredSellers.length === 0 && (
+                  <span className="text-xs text-warning">Nenhum revendedor nesta categoria</span>
+                )}
+              </Label>
+              <ScrollArea className="h-32 border rounded-lg">
+                <div className="p-2 space-y-1">
+                  {filteredSellers.length > 0 ? (
+                    filteredSellers.map((seller) => {
+                      const period = normalizePlanPeriod(seller);
+                      const periodLabel = PLAN_PERIODS.find(p => p.value === period)?.label || period;
+                      
+                      return (
+                        <div
+                          key={seller.id}
+                          className="flex items-center justify-between p-2 bg-muted/30 rounded text-sm"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium truncate max-w-[150px]">
+                              {seller.full_name || seller.email.split('@')[0]}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {seller.whatsapp}
+                            </span>
+                          </div>
+                          <Badge variant="outline" className="text-xs">
+                            {periodLabel}
+                          </Badge>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="flex items-center justify-center h-20 text-sm text-muted-foreground">
+                      Nenhum revendedor corresponde aos filtros selecionados
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          )}
 
           {/* Message */}
           <div className="space-y-2">

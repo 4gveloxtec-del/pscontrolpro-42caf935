@@ -104,7 +104,7 @@ serve(async (req) => {
       if (days <= 95) return 'trimestral';
       if (days <= 185) return 'semestral';
       if (days <= 370) return 'anual';
-      return 'vitalicio';
+      return 'permanente';
     };
 
     const { error: profileError } = await supabase
