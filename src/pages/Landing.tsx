@@ -16,7 +16,13 @@ import {
   ArrowRight,
   Sparkles,
   Tv,
-  Wifi
+  Wifi,
+  Zap,
+  Bot,
+  RefreshCw,
+  Clock,
+  Send,
+  BellRing
 } from 'lucide-react';
 
 // Platform icons as simple styled components
@@ -36,6 +42,40 @@ const platforms = [
   { name: 'H', label: 'HBO Max', color: '#fff', bgColor: '#5822B4' },
   { name: 'P+', label: 'Prime', color: '#fff', bgColor: '#00A8E1' },
   { name: 'TV', label: 'IPTV', color: '#fff', bgColor: 'hsl(var(--primary))' },
+];
+
+// New automation highlights
+const automationHighlights = [
+  {
+    icon: BellRing,
+    title: 'Lembretes Automáticos',
+    description: 'O sistema avisa quando seus clientes vão vencer. Você não precisa lembrar de nada.'
+  },
+  {
+    icon: Send,
+    title: 'Cobrança via WhatsApp',
+    description: 'Mensagens de cobrança enviadas automaticamente via WhatsApp API. Sem esforço manual.'
+  },
+  {
+    icon: RefreshCw,
+    title: 'Renovação Automática',
+    description: 'Clientes renovados automaticamente. Menos trabalho, mais resultados.'
+  },
+  {
+    icon: Bot,
+    title: 'Chatbot Integrado',
+    description: 'Atendimento automático 24h. Respostas prontas para dúvidas frequentes.'
+  },
+  {
+    icon: Clock,
+    title: 'Zero Esquecimentos',
+    description: 'Nunca mais perca um cliente por esquecer a data de vencimento.'
+  },
+  {
+    icon: Zap,
+    title: 'Tudo no Automático',
+    description: 'Configure uma vez e deixe o sistema trabalhar por você.'
+  },
 ];
 
 export default function Landing() {
@@ -113,7 +153,7 @@ export default function Landing() {
         </div>
       </header>
 
-      {/* Hero Section */}
+      {/* Hero Section - Updated for Automation */}
       <section className="relative overflow-hidden">
         {/* Background Effects */}
         <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-transparent to-primary/5 pointer-events-none" />
@@ -121,25 +161,25 @@ export default function Landing() {
         
         <div className="relative container mx-auto px-4 py-16 sm:py-24">
           <div className="max-w-4xl mx-auto text-center space-y-8">
-            {/* Badge */}
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-sm font-medium text-primary animate-fade-in">
-              <Sparkles className="h-4 w-4" />
-              Sistema Completo de Gestão
+            {/* NEW Badge */}
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-green-500/10 border border-green-500/30 text-sm font-medium text-green-600 dark:text-green-400 animate-fade-in">
+              <Zap className="h-4 w-4" />
+              Novo: Automação Completa via WhatsApp
             </div>
 
-            {/* Main Title */}
+            {/* Main Title - Focus on Automation */}
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight animate-fade-in">
-              <span className="text-foreground">Organize suas vendas.</span>
+              <span className="text-foreground">Esqueça de lembrar.</span>
               <br />
-              <span className="text-primary">Nunca mais perca uma renovação.</span>
+              <span className="text-primary">O sistema lembra por você.</span>
             </h1>
 
-            {/* Subtitle */}
+            {/* Subtitle - Clear Value Proposition */}
             <p className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto animate-fade-in">
-              O aplicativo definitivo para revendedores de IPTV, P2P, contas Premium e serviços digitais. 
-              Gerencie clientes de Netflix, Spotify, Disney+, IPTV, P2P e muito mais em um só lugar.
-              <span className="block mt-2 font-medium text-foreground">
-                Porque seu negócio merece funcionar no automático.
+              Lembretes automáticos de vencimento, cobrança via WhatsApp e renovação de clientes — 
+              <span className="font-semibold text-foreground"> tudo no automático</span>.
+              <span className="block mt-2 text-foreground/80">
+                Menos trabalho manual. Mais tempo para vender. Zero clientes perdidos por esquecimento.
               </span>
             </p>
 
@@ -150,33 +190,93 @@ export default function Landing() {
                 className="w-full sm:w-auto text-lg px-8 py-6 gap-2"
                 onClick={() => navigate('/auth')}
               >
-                Começar Agora
+                Automatize suas Renovações
                 <ArrowRight className="h-5 w-5" />
               </Button>
             </div>
 
-            {/* Pricing Badge */}
-            <div className="inline-flex flex-col items-center gap-1 p-4 rounded-2xl bg-card border border-border shadow-lg animate-fade-in">
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl sm:text-4xl font-bold text-primary">R$ {appPrice || '25'}</span>
-                <span className="text-muted-foreground">/mês</span>
+            {/* Quick Stats */}
+            <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground animate-fade-in">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span>Cobrança automática</span>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Teste grátis por {trialDays} dias • Sem cartão
-              </p>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span>Chatbot 24h</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span>WhatsApp API</span>
+              </div>
             </div>
+          </div>
+        </div>
+      </section>
 
-            {/* Platform Icons */}
-            <div className="animate-fade-in pt-4">
-              <p className="text-sm text-muted-foreground mb-4">Gerencie todas as plataformas</p>
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                {platforms.map((platform) => (
-                  <div key={platform.label} className="flex flex-col items-center gap-1">
-                    <PlatformIcon name={platform.name} color={platform.color} bgColor={platform.bgColor} />
-                    <span className="text-xs text-muted-foreground">{platform.label}</span>
+      {/* NEW: Automation Highlights Section */}
+      <section className="py-12 sm:py-16 bg-gradient-to-b from-background to-card/50">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-10">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-xs font-medium text-primary mb-4">
+              <Sparkles className="h-3 w-3" />
+              Novidades
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-bold mb-3">
+              Sistema que trabalha enquanto você vende
+            </h2>
+            <p className="text-muted-foreground max-w-xl mx-auto">
+              Automação completa para você focar no que importa: fechar mais vendas.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto">
+            {automationHighlights.map((item, index) => (
+              <div 
+                key={index}
+                className="group p-5 rounded-xl bg-card border border-border hover:border-primary/50 hover:shadow-lg transition-all duration-300 animate-slide-up"
+                style={{ animationDelay: `${index * 80}ms` }}
+              >
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 group-hover:bg-primary/20 transition-colors">
+                    <item.icon className="h-5 w-5 text-primary" />
                   </div>
-                ))}
+                  <div>
+                    <h3 className="font-semibold text-foreground mb-1">{item.title}</h3>
+                    <p className="text-sm text-muted-foreground">{item.description}</p>
+                  </div>
+                </div>
               </div>
+            ))}
+          </div>
+
+          {/* Secondary CTA */}
+          <div className="text-center mt-10">
+            <Button 
+              variant="outline" 
+              size="lg"
+              onClick={() => navigate('/auth')}
+              className="gap-2"
+            >
+              Conhecer as Novidades
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Platform Icons Section */}
+      <section className="py-10 border-y border-border bg-card/30">
+        <div className="container mx-auto px-4">
+          <div className="text-center">
+            <p className="text-sm text-muted-foreground mb-4">Gerencie todas as plataformas em um só lugar</p>
+            <div className="flex flex-wrap items-center justify-center gap-4">
+              {platforms.map((platform) => (
+                <div key={platform.label} className="flex flex-col items-center gap-1">
+                  <PlatformIcon name={platform.name} color={platform.color} bgColor={platform.bgColor} />
+                  <span className="text-xs text-muted-foreground">{platform.label}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -226,13 +326,15 @@ export default function Landing() {
 
             <div className="space-y-4">
               {[
+                'Lembretes automáticos de vencimento — nunca mais esqueça um cliente',
+                'Cobrança automática via WhatsApp API — sem envio manual',
+                'Chatbot integrado para respostas automáticas 24h',
+                'Renovação de clientes sem precisar fazer nada',
                 'Gerencie IPTV, P2P, SSH, VPN e qualquer serviço de streaming',
                 'Controle contas Premium: Netflix, Spotify, Disney+, HBO Max e mais',
                 'Crie planos personalizados e controle preços automaticamente',
-                'Templates prontos de mensagem para WhatsApp e Telegram',
                 'Chave PIX integrada nas mensagens de cobrança',
                 'Sistema de indicação com descontos automáticos',
-                'Múltiplos servidores e painéis compartilhados',
                 'Relatórios completos de faturamento e previsões',
                 'App instalável no celular com acesso rápido',
                 'Backup completo dos seus dados',
@@ -255,9 +357,11 @@ export default function Landing() {
       <section className="py-16 sm:py-24 bg-gradient-to-br from-primary/10 via-transparent to-primary/5">
         <div className="container mx-auto px-4 text-center">
           <div className="max-w-2xl mx-auto space-y-6">
-            <Users className="h-16 w-16 text-primary mx-auto" />
+            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+              <Zap className="h-8 w-8 text-primary" />
+            </div>
             <h2 className="text-3xl sm:text-4xl font-bold">
-              Pronto para organizar seu negócio?
+              Pronto para automatizar seu negócio?
             </h2>
             <p className="text-lg text-muted-foreground">
               Comece agora com {trialDays} dias grátis. Sem compromisso, sem cartão de crédito.
@@ -270,6 +374,17 @@ export default function Landing() {
               Criar Conta Grátis
               <ArrowRight className="h-5 w-5" />
             </Button>
+            
+            {/* Pricing Badge */}
+            <div className="inline-flex flex-col items-center gap-1 p-4 rounded-2xl bg-card border border-border shadow-lg">
+              <div className="flex items-baseline gap-1">
+                <span className="text-3xl sm:text-4xl font-bold text-primary">R$ {appPrice || '25'}</span>
+                <span className="text-muted-foreground">/mês</span>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Teste grátis por {trialDays} dias • Cancele quando quiser
+              </p>
+            </div>
           </div>
         </div>
       </section>
