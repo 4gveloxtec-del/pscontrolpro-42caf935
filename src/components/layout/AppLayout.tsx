@@ -234,7 +234,7 @@ export function AppLayout() {
   };
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-background">
+    <div className="min-h-screen bg-background">
       {/* Trial Banner - shows for users in trial period */}
       {showTrialBanner && (
         <div 

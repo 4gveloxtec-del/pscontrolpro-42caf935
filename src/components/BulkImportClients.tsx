@@ -571,7 +571,7 @@ export function BulkImportClients({ plans }: BulkImportClientsProps) {
           <span className="sm:hidden">Importar</span>
         </Button>
       </DialogTrigger>
-      <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5" />

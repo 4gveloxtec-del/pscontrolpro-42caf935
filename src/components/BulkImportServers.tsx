@@ -238,7 +238,7 @@ export function BulkImportServers() {
           Importar em Massa
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Server className="h-5 w-5" />
@@ -250,7 +250,7 @@ export function BulkImportServers() {
         </DialogHeader>
 
         {step === 'input' ? (
-          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+          <div className="space-y-4 flex-1 flex flex-col">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Dados dos Servidores</Label>
