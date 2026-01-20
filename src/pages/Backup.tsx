@@ -40,6 +40,7 @@ import {
   FolderOpen
 } from 'lucide-react';
 import { BackupImportNotification } from '@/components/BackupImportNotification';
+import { AdminWipeAllData } from '@/components/AdminWipeAllData';
 
 interface CleanBackupData {
   version: string;
@@ -527,6 +528,30 @@ export default function Backup() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Danger Zone - Wipe All Data */}
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <Trash2 className="h-5 w-5" />
+            Zona de Perigo
+          </CardTitle>
+          <CardDescription>
+            Ações irreversíveis que afetam todos os dados do sistema
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between p-4 bg-destructive/10 rounded-lg border border-destructive/30">
+            <div>
+              <h4 className="font-medium text-destructive">Apagar Todos os Dados</h4>
+              <p className="text-sm text-muted-foreground">
+                Remove todos os clientes e revendedores permanentemente (exceto admin)
+              </p>
+            </div>
+            <AdminWipeAllData />
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Database Info */}
       <Card>
