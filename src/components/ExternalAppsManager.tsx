@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit, ExternalLink, Key, Mail, Monitor, Loader2, AppWindow } from 'lucide-react';
+import { Plus, Trash2, Edit, ExternalLink, Key, Mail, Monitor, Loader2, AppWindow, Lock } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
@@ -36,7 +36,39 @@ export interface ExternalApp {
   seller_id: string;
   price: number;
   cost: number;
+  isFixed?: boolean;
 }
+
+// Apps fixos visíveis para todos os revendedores - NÃO podem ser editados ou removidos
+const FIXED_EXTERNAL_APPS: ExternalApp[] = [
+  // Apps em destaque (principais)
+  { id: 'fixed-clouddy', name: 'CLOUDDY', website_url: 'https://clouddy.online/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-ibo-pro', name: 'IBO PRO', website_url: 'https://iboproapp.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-ibo-player', name: 'IBO PLAYER', website_url: 'https://iboplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-smartone', name: 'SMARTONE', website_url: 'https://smartone-iptv.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  // Demais apps em ordem alfabética
+  { id: 'fixed-abe-player', name: 'ABE PLAYER', website_url: 'https://abeplayertv.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-all-player', name: 'ALL PLAYER', website_url: 'https://iptvallplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-bay-iptv', name: 'BAY IPTV', website_url: 'https://cms.bayip.tv/user/manage/playlist', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-bob-player', name: 'BOB PLAYER', website_url: 'https://bobplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-duplecast', name: 'DUPLECAST', website_url: 'https://duplecast.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-duplex-play', name: 'DUPLEX PLAY', website_url: 'https://edit.duplexplay.com/Default', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-easy-player', name: 'EASY PLAYER', website_url: 'https://easyplayer.io/#/home', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-family-player', name: 'FAMILY PLAYER', website_url: 'https://www.family4kplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-hot-iptv', name: 'HOT IPTV', website_url: 'https://hotplayer.app/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-hush-play', name: 'HUSH PLAY', website_url: 'https://www.hushplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-iboss-player', name: 'IBOSS PLAYER', website_url: 'https://ibossiptv.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-iboxx-player', name: 'IBOXX PLAYER', website_url: 'https://iboxxiptv.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-king4k-player', name: 'KING4K PLAYER', website_url: 'https://king4kplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-ktn-player', name: 'KTN PLAYER', website_url: 'https://ktntvplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-lumina-player', name: 'LUMINA PLAYER', website_url: 'https://luminaplayer.com/#/home', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-mac-player', name: 'MAC PLAYER', website_url: 'https://mactvplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-mika-player', name: 'MIKA PLAYER', website_url: 'https://mikaplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-quick-player', name: 'QUICK PLAYER', website_url: 'https://quickplayer.app/#/home', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-rivolut-player', name: 'RIVOLUT PLAYER', website_url: 'https://rivolutplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-virginia-player', name: 'VIRGINIA PLAYER', website_url: 'https://virginia-player.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+  { id: 'fixed-vu-player-pro', name: 'VU PLAYER PRO', website_url: 'https://vuplayer.pro/reseller/login', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0, isFixed: true },
+];
 
 export function ExternalAppsManager() {
   const { user } = useAuth();
@@ -52,7 +84,7 @@ export function ExternalAppsManager() {
     cost: 0,
   });
 
-  const { data: apps = [], isLoading } = useQuery({
+  const { data: customApps = [], isLoading } = useQuery({
     queryKey: ['external-apps', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -65,6 +97,11 @@ export function ExternalAppsManager() {
     },
     enabled: !!user?.id,
   });
+
+  // Combinar apps fixos com apps personalizados do revendedor
+  const allApps = useMemo(() => {
+    return [...FIXED_EXTERNAL_APPS, ...customApps];
+  }, [customApps]);
 
   const createMutation = useMutation({
     mutationFn: async (data: { name: string; website_url: string; auth_type: 'mac_key' | 'email_password' }) => {
@@ -321,96 +358,136 @@ export function ExternalAppsManager() {
         <div className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
-      ) : apps.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-            <AppWindow className="h-10 w-10 text-muted-foreground mb-3" />
-            <p className="text-sm text-muted-foreground">
-              Nenhum aplicativo cadastrado ainda.
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Cadastre apps como IBO PRO, Bob Player para vincular aos clientes.
-            </p>
-          </CardContent>
-        </Card>
       ) : (
-        <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {apps.map((app) => (
-            <Card key={app.id} className="relative">
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1 flex-1 min-w-0">
-                    <h4 className="font-medium truncate">{app.name}</h4>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className="text-xs">
-                        {app.auth_type === 'mac_key' ? (
-                          <><Monitor className="h-3 w-3 mr-1" /> MAC + Key</>
-                        ) : (
-                          <><Mail className="h-3 w-3 mr-1" /> E-mail</>
-                        )}
-                      </Badge>
-                      {(app.price > 0 || app.cost > 0) && (
-                        <Badge variant="secondary" className="text-xs">
-                          Lucro: R$ {((app.price || 0) - (app.cost || 0)).toFixed(2)}
-                        </Badge>
-                      )}
-                    </div>
-                    {(app.price > 0 || app.cost > 0) && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Venda: R$ {(app.price || 0).toFixed(2)} | Custo: R$ {(app.cost || 0).toFixed(2)}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-2 mt-2">
+        <div className="space-y-6">
+          {/* Apps Fixos do Sistema */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Lock className="h-4 w-4 text-muted-foreground" />
+              <h4 className="font-medium text-sm text-muted-foreground">Apps do Sistema (Não editáveis)</h4>
+            </div>
+            <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {FIXED_EXTERNAL_APPS.map((app) => (
+                <Card key={app.id} className="relative border-dashed">
+                  <CardContent className="p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
+                        <h4 className="font-medium text-sm truncate">{app.name}</h4>
+                      </div>
                       {app.website_url && (
                         <a
                           href={app.website_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs text-primary hover:underline flex items-center gap-1"
+                          className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0"
                         >
                           <ExternalLink className="h-3 w-3" />
-                          Site
-                        </a>
-                      )}
-                      {app.download_url && (
-                        <a
-                          href={app.download_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-green-600 hover:underline flex items-center gap-1"
-                        >
-                          <ExternalLink className="h-3 w-3" />
-                          Download
                         </a>
                       )}
                     </div>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => handleEdit(app)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => {
-                        if (confirm(`Remover o app "${app.name}"?`)) {
-                          deleteMutation.mutate(app.id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+
+          {/* Apps Personalizados do Revendedor */}
+          <div className="space-y-3">
+            <h4 className="font-medium text-sm">Meus Apps Personalizados</h4>
+            {customApps.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-6 text-center">
+                  <AppWindow className="h-8 w-8 text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground">
+                    Nenhum app personalizado cadastrado.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Clique em "Novo App" para adicionar seus próprios apps.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                {customApps.map((app) => (
+                  <Card key={app.id} className="relative">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="space-y-1 flex-1 min-w-0">
+                          <h4 className="font-medium truncate">{app.name}</h4>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              {app.auth_type === 'mac_key' ? (
+                                <><Monitor className="h-3 w-3 mr-1" /> MAC + Key</>
+                              ) : (
+                                <><Mail className="h-3 w-3 mr-1" /> E-mail</>
+                              )}
+                            </Badge>
+                            {(app.price > 0 || app.cost > 0) && (
+                              <Badge variant="secondary" className="text-xs">
+                                Lucro: R$ {((app.price || 0) - (app.cost || 0)).toFixed(2)}
+                              </Badge>
+                            )}
+                          </div>
+                          {(app.price > 0 || app.cost > 0) && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Venda: R$ {(app.price || 0).toFixed(2)} | Custo: R$ {(app.cost || 0).toFixed(2)}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap gap-2 mt-2">
+                            {app.website_url && (
+                              <a
+                                href={app.website_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-primary hover:underline flex items-center gap-1"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                Site
+                              </a>
+                            )}
+                            {app.download_url && (
+                              <a
+                                href={app.download_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-green-600 hover:underline flex items-center gap-1"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                                Download
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handleEdit(app)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => {
+                              if (confirm(`Remover o app "${app.name}"?`)) {
+                                deleteMutation.mutate(app.id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

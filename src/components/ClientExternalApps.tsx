@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useCrypto } from '@/hooks/useCrypto';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -16,13 +16,44 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { toast } from 'sonner';
-import { Plus, Trash2, Monitor, Mail, Key, ExternalLink, Loader2, AppWindow, Copy, CalendarIcon } from 'lucide-react';
+import { Plus, Trash2, Monitor, Mail, Key, ExternalLink, Loader2, AppWindow, Copy, CalendarIcon, Lock } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { format, addMonths } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import type { ExternalApp } from './ExternalAppsManager';
+
+// Apps fixos visíveis para todos os revendedores - NÃO podem ser editados ou removidos
+const FIXED_EXTERNAL_APPS: ExternalApp[] = [
+  // Apps em destaque (principais)
+  { id: 'fixed-clouddy', name: 'CLOUDDY', website_url: 'https://clouddy.online/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-ibo-pro', name: 'IBO PRO', website_url: 'https://iboproapp.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-ibo-player', name: 'IBO PLAYER', website_url: 'https://iboplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-smartone', name: 'SMARTONE', website_url: 'https://smartone-iptv.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  // Demais apps em ordem alfabética
+  { id: 'fixed-abe-player', name: 'ABE PLAYER', website_url: 'https://abeplayertv.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-all-player', name: 'ALL PLAYER', website_url: 'https://iptvallplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-bay-iptv', name: 'BAY IPTV', website_url: 'https://cms.bayip.tv/user/manage/playlist', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-bob-player', name: 'BOB PLAYER', website_url: 'https://bobplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-duplecast', name: 'DUPLECAST', website_url: 'https://duplecast.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-duplex-play', name: 'DUPLEX PLAY', website_url: 'https://edit.duplexplay.com/Default', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-easy-player', name: 'EASY PLAYER', website_url: 'https://easyplayer.io/#/home', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-family-player', name: 'FAMILY PLAYER', website_url: 'https://www.family4kplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-hot-iptv', name: 'HOT IPTV', website_url: 'https://hotplayer.app/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-hush-play', name: 'HUSH PLAY', website_url: 'https://www.hushplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-iboss-player', name: 'IBOSS PLAYER', website_url: 'https://ibossiptv.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-iboxx-player', name: 'IBOXX PLAYER', website_url: 'https://iboxxiptv.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-king4k-player', name: 'KING4K PLAYER', website_url: 'https://king4kplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-ktn-player', name: 'KTN PLAYER', website_url: 'https://ktntvplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-lumina-player', name: 'LUMINA PLAYER', website_url: 'https://luminaplayer.com/#/home', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-mac-player', name: 'MAC PLAYER', website_url: 'https://mactvplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-mika-player', name: 'MIKA PLAYER', website_url: 'https://mikaplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-quick-player', name: 'QUICK PLAYER', website_url: 'https://quickplayer.app/#/home', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-rivolut-player', name: 'RIVOLUT PLAYER', website_url: 'https://rivolutplayer.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-virginia-player', name: 'VIRGINIA PLAYER', website_url: 'https://virginia-player.com/', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+  { id: 'fixed-vu-player-pro', name: 'VU PLAYER PRO', website_url: 'https://vuplayer.pro/reseller/login', download_url: null, auth_type: 'mac_key', is_active: true, seller_id: 'system', price: 0, cost: 0 },
+];
 
 interface MacDevice {
   name: string;
@@ -56,8 +87,8 @@ export function ClientExternalApps({ clientId, sellerId, onChange, initialApps =
   // Local state for form (when creating new client)
   const [localApps, setLocalApps] = useState<{ appId: string; devices: MacDevice[]; email: string; password: string; expirationDate: string }[]>(initialApps);
 
-  // Fetch available external apps
-  const { data: availableApps = [] } = useQuery({
+  // Fetch available external apps (custom ones from reseller)
+  const { data: customApps = [] } = useQuery({
     queryKey: ['external-apps', sellerId],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -71,6 +102,11 @@ export function ClientExternalApps({ clientId, sellerId, onChange, initialApps =
     },
     enabled: !!sellerId,
   });
+
+  // Combine fixed apps with custom apps
+  const availableApps = useMemo(() => {
+    return [...FIXED_EXTERNAL_APPS, ...customApps];
+  }, [customApps]);
 
   // Fetch client's linked apps (only when editing)
   const { data: linkedApps = [], isLoading: isLoadingLinked } = useQuery({
