@@ -312,6 +312,57 @@ export type Database = {
         }
         Relationships: []
       }
+      bulk_collection_jobs: {
+        Row: {
+          clients_data: Json
+          created_at: string
+          current_index: number
+          error_count: number
+          id: string
+          interval_seconds: number
+          last_error: string | null
+          processed_clients: number
+          profile_data: Json | null
+          seller_id: string
+          status: string
+          success_count: number
+          total_clients: number
+          updated_at: string
+        }
+        Insert: {
+          clients_data?: Json
+          created_at?: string
+          current_index?: number
+          error_count?: number
+          id?: string
+          interval_seconds?: number
+          last_error?: string | null
+          processed_clients?: number
+          profile_data?: Json | null
+          seller_id: string
+          status?: string
+          success_count?: number
+          total_clients?: number
+          updated_at?: string
+        }
+        Update: {
+          clients_data?: Json
+          created_at?: string
+          current_index?: number
+          error_count?: number
+          id?: string
+          interval_seconds?: number
+          last_error?: string | null
+          processed_clients?: number
+          profile_data?: Json | null
+          seller_id?: string
+          status?: string
+          success_count?: number
+          total_clients?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       chatbot_contacts: {
         Row: {
           client_id: string | null

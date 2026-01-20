@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -10,10 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
-import { Send, Play, Pause, Square, Clock, CheckCircle2, XCircle, AlertCircle, Users, Loader2, MessageCircle } from 'lucide-react';
+import { Play, Pause, Square, Clock, CheckCircle2, XCircle, AlertCircle, Users, Loader2, MessageCircle, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 
 interface Client {
   id: string;
@@ -32,11 +30,19 @@ interface Client {
   daysRemaining?: number;
 }
 
-interface SendResult {
-  clientId: string;
-  clientName: string;
-  status: 'success' | 'error' | 'pending' | 'skipped';
-  message?: string;
+interface BulkJob {
+  id: string;
+  seller_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'paused' | 'cancelled';
+  total_clients: number;
+  processed_clients: number;
+  success_count: number;
+  error_count: number;
+  interval_seconds: number;
+  current_index: number;
+  created_at: string;
+  updated_at: string;
+  last_error?: string;
 }
 
 interface BulkCollectionDialogProps {
@@ -53,18 +59,58 @@ export function BulkCollectionDialog({
   filterLabel = 'selecionados' 
 }: BulkCollectionDialogProps) {
   const { user, profile } = useAuth();
+  const queryClient = useQueryClient();
   const [intervalSeconds, setIntervalSeconds] = useState(15);
-  const [isSending, setIsSending] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [results, setResults] = useState<SendResult[]>([]);
-  const [countdown, setCountdown] = useState(0);
-  const abortRef = useRef(false);
-  const pauseRef = useRef(false);
 
   // Clients with valid phone numbers
   const clientsWithPhone = clients.filter(c => c.phone && c.phone.replace(/\D/g, '').length >= 10);
   const clientsWithoutPhone = clients.filter(c => !c.phone || c.phone.replace(/\D/g, '').length < 10);
+
+  // Fetch active job
+  const { data: activeJob, refetch: refetchJob, isLoading: isLoadingJob } = useQuery({
+    queryKey: ['bulk-job-active', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke('bulk-collection-processor', {
+        body: { action: 'get_active', seller_id: user!.id },
+      });
+      if (error) throw error;
+      return data.job as BulkJob | null;
+    },
+    enabled: !!user?.id && open,
+    refetchInterval: (query) => {
+      const job = query.state.data as BulkJob | null;
+      // Only poll if there's an active job
+      if (job?.status === 'processing' || job?.status === 'pending') {
+        return 2000; // Poll every 2 seconds
+      }
+      return false;
+    },
+  });
+
+  // Subscribe to realtime updates
+  useEffect(() => {
+    if (!user?.id || !open) return;
+
+    const channel = supabase
+      .channel(`bulk-job-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'bulk_collection_jobs',
+          filter: `seller_id=eq.${user.id}`,
+        },
+        () => {
+          refetchJob();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, open, refetchJob]);
 
   // Fetch WhatsApp seller instance
   const { data: sellerInstance } = useQuery({
@@ -95,242 +141,132 @@ export function BulkCollectionDialog({
     enabled: open,
   });
 
-  // Fetch templates
-  const { data: templates } = useQuery({
-    queryKey: ['templates', user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('whatsapp_templates')
-        .select('*')
-        .eq('seller_id', user!.id);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!user?.id && open,
-  });
-
   const canSendViaApi = sellerInstance?.is_connected && 
     !sellerInstance?.instance_blocked && 
     globalConfig?.is_active &&
     globalConfig?.api_url &&
     globalConfig?.api_token;
 
-  const formatDate = (dateStr: string): string => new Date(dateStr).toLocaleDateString('pt-BR');
+  // Start job mutation
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      const clientsData = clientsWithPhone.map(c => ({
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        expiration_date: c.expiration_date,
+        plan_name: c.plan_name,
+        plan_price: c.plan_price,
+        category: c.category,
+        daysRemaining: c.daysRemaining,
+      }));
 
-  const daysUntil = (dateStr: string): number => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const target = new Date(dateStr);
-    target.setHours(0, 0, 0, 0);
-    return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-  };
-
-  const getTemplateForClient = (client: Client) => {
-    const categoryLower = (client.category || 'iptv').toLowerCase();
-    const daysLeft = client.daysRemaining ?? daysUntil(client.expiration_date);
-    
-    let templateType = 'expired';
-    if (daysLeft > 0 && daysLeft <= 3) templateType = 'expiring_3days';
-    if (daysLeft > 3) templateType = 'billing';
-    
-    return templates?.find(t => t.type === templateType && t.name.toLowerCase().includes(categoryLower)) 
-      || templates?.find(t => t.type === templateType);
-  };
-
-  const replaceVariables = (template: string, client: Client): string => {
-    const daysLeft = client.daysRemaining ?? daysUntil(client.expiration_date);
-    return template
-      .replace(/\{nome\}/g, client.name || '')
-      .replace(/\{empresa\}/g, (profile as any)?.company_name || profile?.full_name || '')
-      .replace(/\{vencimento\}/g, formatDate(client.expiration_date))
-      .replace(/\{dias_restantes\}/g, String(daysLeft))
-      .replace(/\{valor\}/g, String(client.plan_price || 0))
-      .replace(/\{plano\}/g, client.plan_name || '')
-      .replace(/\{pix\}/g, (profile as any)?.pix_key || '')
-      .replace(/\{servico\}/g, client.category || 'IPTV');
-  };
-
-  const sendMessageToClient = async (client: Client): Promise<SendResult> => {
-    const template = getTemplateForClient(client);
-    
-    if (!template) {
-      return {
-        clientId: client.id,
-        clientName: client.name,
-        status: 'error',
-        message: 'Template não encontrado'
-      };
-    }
-
-    const message = replaceVariables(template.message, client);
-    let phone = client.phone!.replace(/\D/g, '');
-    if (!phone.startsWith('55') && (phone.length === 10 || phone.length === 11)) {
-      phone = '55' + phone;
-    }
-
-    try {
-      const { data, error } = await supabase.functions.invoke('evolution-api', {
-        body: {
-          action: 'send_message',
-          config: {
-            api_url: globalConfig!.api_url,
-            api_token: globalConfig!.api_token,
-            instance_name: sellerInstance!.instance_name,
+      const { data, error } = await supabase.functions.invoke('bulk-collection-processor', {
+        body: { 
+          action: 'start', 
+          seller_id: user!.id,
+          clients: clientsData,
+          interval_seconds: intervalSeconds,
+          profile_data: {
+            company_name: (profile as any)?.company_name,
+            full_name: profile?.full_name,
+            pix_key: (profile as any)?.pix_key,
           },
-          phone,
-          message,
         },
       });
 
       if (error) throw error;
-      
-      if (data.success) {
-        // Record notification sent
-        const daysLeft = client.daysRemaining ?? daysUntil(client.expiration_date);
-        const notificationType = daysLeft <= 0 ? 'iptv_vencimento' : daysLeft <= 3 ? 'iptv_3_dias' : 'iptv_cobranca';
-        
-        await supabase.from('client_notification_tracking').insert({
-          client_id: client.id,
-          seller_id: user!.id,
-          notification_type: notificationType,
-          expiration_cycle_date: client.expiration_date,
-          sent_via: 'api_bulk',
-        });
-        
-        return {
-          clientId: client.id,
-          clientName: client.name,
-          status: 'success',
-          message: 'Enviado com sucesso'
-        };
-      } else {
-        return {
-          clientId: client.id,
-          clientName: client.name,
-          status: 'error',
-          message: data.error || 'Falha no envio'
-        };
-      }
-    } catch (error: any) {
-      return {
-        clientId: client.id,
-        clientName: client.name,
-        status: 'error',
-        message: error.message || 'Erro desconhecido'
-      };
-    }
-  };
+      if (data.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => {
+      toast.success('Envio iniciado em segundo plano!', {
+        description: 'Você pode fechar esta janela. O envio continuará automaticamente.',
+      });
+      refetchJob();
+    },
+    onError: (error: any) => {
+      toast.error('Erro ao iniciar envio', { description: error.message });
+    },
+  });
 
-  const startBulkSend = async () => {
-    if (!canSendViaApi) {
-      toast.error('API do WhatsApp não está configurada ou conectada');
-      return;
-    }
+  // Pause job mutation
+  const pauseMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('bulk-collection-processor', {
+        body: { action: 'pause', job_id: activeJob!.id, seller_id: user!.id },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      toast.info('Envio pausado');
+      refetchJob();
+    },
+  });
 
-    setIsSending(true);
-    setIsPaused(false);
-    abortRef.current = false;
-    pauseRef.current = false;
-    setResults([]);
-    setCurrentIndex(0);
+  // Resume job mutation
+  const resumeMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('bulk-collection-processor', {
+        body: { action: 'resume', job_id: activeJob!.id, seller_id: user!.id },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      toast.success('Envio retomado');
+      refetchJob();
+    },
+  });
 
-    await processBulkSend(0);
-  };
+  // Cancel job mutation
+  const cancelMutation = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('bulk-collection-processor', {
+        body: { action: 'cancel', job_id: activeJob!.id, seller_id: user!.id },
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      toast.info('Envio cancelado');
+      refetchJob();
+    },
+  });
 
-  const processBulkSend = async (startIndex: number) => {
-    for (let i = startIndex; i < clientsWithPhone.length; i++) {
-      // Check if aborted
-      if (abortRef.current) {
-        setIsSending(false);
-        toast.info('Envio cancelado');
-        return;
-      }
+  const isProcessing = activeJob?.status === 'processing' || activeJob?.status === 'pending';
+  const isPaused = activeJob?.status === 'paused';
+  const isCompleted = activeJob?.status === 'completed';
+  const isCancelled = activeJob?.status === 'cancelled';
+  const hasActiveJob = isProcessing || isPaused;
 
-      // Check if paused
-      if (pauseRef.current) {
-        setCurrentIndex(i);
-        toast.info('Envio pausado');
-        return;
-      }
-
-      const client = clientsWithPhone[i];
-      setCurrentIndex(i);
-
-      // Mark as pending
-      setResults(prev => [...prev, { clientId: client.id, clientName: client.name, status: 'pending' }]);
-
-      // Send message
-      const result = await sendMessageToClient(client);
-      
-      // Update result
-      setResults(prev => prev.map(r => r.clientId === client.id ? result : r));
-
-      // Wait for interval (with countdown) if not last client
-      if (i < clientsWithPhone.length - 1 && !abortRef.current && !pauseRef.current) {
-        for (let s = intervalSeconds; s > 0; s--) {
-          if (abortRef.current || pauseRef.current) break;
-          setCountdown(s);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-        setCountdown(0);
-      }
-    }
-
-    setIsSending(false);
-    setCurrentIndex(clientsWithPhone.length);
-    
-    const successCount = results.filter(r => r.status === 'success').length + 1; // +1 for current
-    toast.success(`Envio concluído! ${successCount} mensagens enviadas.`);
-  };
-
-  const pauseSend = () => {
-    pauseRef.current = true;
-    setIsPaused(true);
-  };
-
-  const resumeSend = () => {
-    setIsPaused(false);
-    pauseRef.current = false;
-    processBulkSend(currentIndex);
-  };
-
-  const stopSend = () => {
-    abortRef.current = true;
-    pauseRef.current = false;
-    setIsSending(false);
-    setIsPaused(false);
-  };
-
-  // Reset state when dialog closes
-  useEffect(() => {
-    if (!open) {
-      setIsSending(false);
-      setIsPaused(false);
-      setCurrentIndex(0);
-      setResults([]);
-      setCountdown(0);
-      abortRef.current = false;
-      pauseRef.current = false;
-    }
-  }, [open]);
-
-  const progress = clientsWithPhone.length > 0 
-    ? ((currentIndex + (isSending ? 0 : 0)) / clientsWithPhone.length) * 100 
+  const progress = activeJob 
+    ? (activeJob.processed_clients / activeJob.total_clients) * 100 
     : 0;
 
-  const successCount = results.filter(r => r.status === 'success').length;
-  const errorCount = results.filter(r => r.status === 'error').length;
+  const handleStartNew = useCallback(() => {
+    startMutation.mutate();
+  }, [startMutation]);
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !isSending && onOpenChange(o)}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <MessageCircle className="h-5 w-5 text-primary" />
             Cobrança em Massa
+            {hasActiveJob && (
+              <Badge variant="outline" className="ml-2 animate-pulse">
+                {isProcessing ? 'Enviando...' : 'Pausado'}
+              </Badge>
+            )}
           </DialogTitle>
           <DialogDescription>
-            Enviar mensagem de cobrança para {clientsWithPhone.length} clientes {filterLabel}
+            {hasActiveJob 
+              ? `Job em andamento: ${activeJob.processed_clients}/${activeJob.total_clients} processados`
+              : `Enviar mensagem de cobrança para ${clientsWithPhone.length} clientes ${filterLabel}`
+            }
           </DialogDescription>
         </DialogHeader>
 
@@ -339,23 +275,37 @@ export function BulkCollectionDialog({
           <div className="grid grid-cols-3 gap-2">
             <div className="bg-muted/50 rounded-lg p-3 text-center">
               <Users className="h-5 w-5 mx-auto text-primary mb-1" />
-              <p className="text-lg font-bold">{clientsWithPhone.length}</p>
-              <p className="text-xs text-muted-foreground">Com telefone</p>
+              <p className="text-lg font-bold">
+                {hasActiveJob ? activeJob.total_clients : clientsWithPhone.length}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {hasActiveJob ? 'Total' : 'Com telefone'}
+              </p>
             </div>
             <div className="bg-muted/50 rounded-lg p-3 text-center">
               <CheckCircle2 className="h-5 w-5 mx-auto text-success mb-1" />
-              <p className="text-lg font-bold">{successCount}</p>
+              <p className="text-lg font-bold">{activeJob?.success_count || 0}</p>
               <p className="text-xs text-muted-foreground">Enviados</p>
             </div>
             <div className="bg-muted/50 rounded-lg p-3 text-center">
               <XCircle className="h-5 w-5 mx-auto text-destructive mb-1" />
-              <p className="text-lg font-bold">{errorCount}</p>
+              <p className="text-lg font-bold">{activeJob?.error_count || 0}</p>
               <p className="text-xs text-muted-foreground">Erros</p>
             </div>
           </div>
 
+          {/* Background processing notice */}
+          {hasActiveJob && (
+            <div className="flex items-center gap-2 p-3 bg-primary/10 border border-primary/30 rounded-lg text-sm">
+              <RefreshCw className="h-4 w-4 text-primary shrink-0 animate-spin" />
+              <span className="text-primary">
+                O envio continua em segundo plano mesmo se você fechar esta janela ou sair da página!
+              </span>
+            </div>
+          )}
+
           {/* Clients without phone warning */}
-          {clientsWithoutPhone.length > 0 && (
+          {!hasActiveJob && clientsWithoutPhone.length > 0 && (
             <div className="flex items-center gap-2 p-2 bg-warning/10 border border-warning/30 rounded-lg text-sm">
               <AlertCircle className="h-4 w-4 text-warning shrink-0" />
               <span className="text-warning">
@@ -365,27 +315,29 @@ export function BulkCollectionDialog({
           )}
 
           {/* API Status */}
-          <div className={cn(
-            "flex items-center gap-2 p-2 rounded-lg text-sm",
-            canSendViaApi ? "bg-success/10 border border-success/30" : "bg-destructive/10 border border-destructive/30"
-          )}>
-            {canSendViaApi ? (
-              <>
-                <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
-                <span className="text-success">WhatsApp API conectada e pronta</span>
-              </>
-            ) : (
-              <>
-                <XCircle className="h-4 w-4 text-destructive shrink-0" />
-                <span className="text-destructive">
-                  WhatsApp API não disponível - configure na página de Automação
-                </span>
-              </>
-            )}
-          </div>
+          {!hasActiveJob && (
+            <div className={cn(
+              "flex items-center gap-2 p-2 rounded-lg text-sm",
+              canSendViaApi ? "bg-success/10 border border-success/30" : "bg-destructive/10 border border-destructive/30"
+            )}>
+              {canSendViaApi ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+                  <span className="text-success">WhatsApp API conectada e pronta</span>
+                </>
+              ) : (
+                <>
+                  <XCircle className="h-4 w-4 text-destructive shrink-0" />
+                  <span className="text-destructive">
+                    WhatsApp API não disponível - configure na página de Automação
+                  </span>
+                </>
+              )}
+            </div>
+          )}
 
-          {/* Interval config */}
-          {!isSending && (
+          {/* Interval config - only show when no active job */}
+          {!hasActiveJob && (
             <div className="space-y-2">
               <Label htmlFor="interval" className="text-sm flex items-center gap-2">
                 <Clock className="h-4 w-4" />
@@ -409,93 +361,130 @@ export function BulkCollectionDialog({
           )}
 
           {/* Progress */}
-          {(isSending || results.length > 0) && (
+          {hasActiveJob && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-muted-foreground">Progresso</span>
-                <span className="font-medium">{Math.min(currentIndex + 1, clientsWithPhone.length)} / {clientsWithPhone.length}</span>
+                <span className="font-medium">
+                  {activeJob.processed_clients} / {activeJob.total_clients}
+                </span>
               </div>
               <Progress value={progress} className="h-2" />
               
-              {countdown > 0 && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
-                  <Clock className="h-4 w-4" />
-                  Aguardando {countdown}s antes do próximo envio...
+              {isProcessing && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Enviando mensagens... (intervalo: {activeJob.interval_seconds}s)
                 </div>
               )}
             </div>
           )}
 
-          {/* Results list */}
-          {results.length > 0 && (
-            <ScrollArea className="h-40 border rounded-lg p-2">
-              <div className="space-y-1">
-                {results.map((result) => (
-                  <div 
-                    key={result.clientId}
-                    className={cn(
-                      "flex items-center justify-between p-2 rounded text-sm",
-                      result.status === 'success' && "bg-success/10",
-                      result.status === 'error' && "bg-destructive/10",
-                      result.status === 'pending' && "bg-muted/50"
-                    )}
-                  >
-                    <span className="truncate">{result.clientName}</span>
-                    <div className="flex items-center gap-1">
-                      {result.status === 'success' && <CheckCircle2 className="h-4 w-4 text-success" />}
-                      {result.status === 'error' && (
-                        <span className="text-xs text-destructive truncate max-w-[100px]" title={result.message}>
-                          {result.message}
-                        </span>
-                      )}
-                      {result.status === 'pending' && <Loader2 className="h-4 w-4 animate-spin" />}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </ScrollArea>
+          {/* Completed/Cancelled status */}
+          {(isCompleted || isCancelled) && activeJob && (
+            <div className={cn(
+              "p-3 rounded-lg text-sm",
+              isCompleted ? "bg-success/10 border border-success/30" : "bg-muted/50 border border-muted"
+            )}>
+              <p className="font-medium">
+                {isCompleted ? '✅ Envio concluído!' : '⏹ Envio cancelado'}
+              </p>
+              <p className="text-muted-foreground mt-1">
+                {activeJob.success_count} mensagens enviadas, {activeJob.error_count} erros
+              </p>
+              {activeJob.last_error && (
+                <p className="text-destructive mt-1 text-xs">{activeJob.last_error}</p>
+              )}
+            </div>
           )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          {!isSending && !isPaused && (
+          {/* No active job - show start button */}
+          {!hasActiveJob && !isCompleted && !isCancelled && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Cancelar
               </Button>
               <Button 
-                onClick={startBulkSend} 
-                disabled={!canSendViaApi || clientsWithPhone.length === 0}
+                onClick={handleStartNew} 
+                disabled={!canSendViaApi || clientsWithPhone.length === 0 || startMutation.isPending}
                 className="gap-2"
               >
-                <Play className="h-4 w-4" />
+                {startMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
                 Iniciar Envio
               </Button>
             </>
           )}
           
-          {isSending && !isPaused && (
+          {/* Processing - show pause/cancel */}
+          {isProcessing && (
             <>
-              <Button variant="outline" onClick={pauseSend} className="gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => pauseMutation.mutate()} 
+                disabled={pauseMutation.isPending}
+                className="gap-2"
+              >
                 <Pause className="h-4 w-4" />
                 Pausar
               </Button>
-              <Button variant="destructive" onClick={stopSend} className="gap-2">
+              <Button 
+                variant="destructive" 
+                onClick={() => cancelMutation.mutate()}
+                disabled={cancelMutation.isPending}
+                className="gap-2"
+              >
                 <Square className="h-4 w-4" />
                 Cancelar
               </Button>
             </>
           )}
           
+          {/* Paused - show resume/stop */}
           {isPaused && (
             <>
-              <Button variant="outline" onClick={stopSend} className="gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => cancelMutation.mutate()}
+                disabled={cancelMutation.isPending}
+                className="gap-2"
+              >
                 <Square className="h-4 w-4" />
                 Parar
               </Button>
-              <Button onClick={resumeSend} className="gap-2">
+              <Button 
+                onClick={() => resumeMutation.mutate()}
+                disabled={resumeMutation.isPending}
+                className="gap-2"
+              >
                 <Play className="h-4 w-4" />
                 Continuar
+              </Button>
+            </>
+          )}
+
+          {/* Completed/Cancelled - show close and new */}
+          {(isCompleted || isCancelled) && (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                Fechar
+              </Button>
+              <Button 
+                onClick={handleStartNew} 
+                disabled={!canSendViaApi || clientsWithPhone.length === 0 || startMutation.isPending}
+                className="gap-2"
+              >
+                {startMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                Novo Envio
               </Button>
             </>
           )}
