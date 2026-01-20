@@ -29,10 +29,14 @@ export function useAdminChatbotConfig() {
 
   const fetchNodes = useCallback(async () => {
     setIsLoading(true);
+    console.log('[AdminChatbot] Fetching nodes...');
+    
     const { data, error } = await supabase
       .from('admin_chatbot_config')
       .select('*')
       .order('sort_order');
+
+    console.log('[AdminChatbot] Fetch result:', { data, error, count: data?.length });
 
     if (error) {
       console.error('Error fetching chatbot config:', error);

@@ -14,21 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAdminChatbotConfig, ChatbotNode, ChatbotOption } from '@/hooks/useAdminChatbotConfig';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
-import { useAuth } from '@/hooks/useAuth';
 import { 
-  MessageSquare, 
   Send, 
   RotateCcw, 
   Bot, 
-  Home,
-  CreditCard,
-  Gift,
-  Wrench,
-  Headphones,
   Plus,
   Pencil,
   Trash2,
-  Save,
   X,
   ChevronRight,
   AlertTriangle,
@@ -37,7 +29,7 @@ import {
   FileText,
   Import
 } from 'lucide-react';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
 
 interface Message {
   id: string;
@@ -58,7 +50,6 @@ const ICON_OPTIONS = ['🏠', '📋', '💰', '🎁', '📱', '🍎', '🔥', '�
 
 export default function AdminChatbot() {
   const { nodes, isLoading, getNodeByKey, createNode, updateNode, deleteNode, processUserInput } = useAdminChatbotConfig();
-  const { user } = useAuth();
   
   // Simulator state
   const [messages, setMessages] = useState<Message[]>([]);
