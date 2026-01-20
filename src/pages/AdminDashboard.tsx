@@ -6,6 +6,7 @@ import { Users, Server, CreditCard, TrendingUp, Shield, Activity } from 'lucide-
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { AdminBroadcastResellers } from '@/components/AdminBroadcastResellers';
+import { AdminWipeAllData } from '@/components/AdminWipeAllData';
 
 export default function AdminDashboard() {
   const { profile } = useAuth();
@@ -92,10 +93,13 @@ export default function AdminDashboard() {
             Painel Administrativo
           </h1>
           <p className="text-slate-400 mt-1">
-            Bem-vindo, {profile?.full_name || 'Administrador'}
+          Bem-vindo, {profile?.full_name || 'Administrador'}
           </p>
         </div>
-        <AdminBroadcastResellers />
+        <div className="flex items-center gap-2">
+          <AdminWipeAllData />
+          <AdminBroadcastResellers />
+        </div>
       </div>
 
       {/* Stats Cards */}
