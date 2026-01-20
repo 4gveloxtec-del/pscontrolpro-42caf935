@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useWhatsAppSellerInstance } from '@/hooks/useWhatsAppSellerInstance';
 import { useWhatsAppGlobalConfig } from '@/hooks/useWhatsAppGlobalConfig';
+import { useTrialApiStatus } from '@/hooks/useTrialApiStatus';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +25,8 @@ import {
   Lock,
   PartyPopper,
   CheckCircle2,
-  Sparkles
+  Sparkles,
+  Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -36,6 +38,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import confetti from 'canvas-confetti';
+import { TrialStatusBanner } from '@/components/TrialStatusBanner';
 
 export function WhatsAppSellerConfig() {
   const { user, profile, isAdmin } = useAuth();
@@ -51,6 +54,17 @@ export function WhatsAppSellerConfig() {
   } = useWhatsAppSellerInstance();
 
   const { config: globalConfig, isApiActive, isLoading: isLoadingConfig } = useWhatsAppGlobalConfig();
+  const { 
+    isInTrial,
+    apiBlocked: trialApiBlocked,
+    blockReason: trialBlockReason,
+    apiHoursRemaining,
+    apiAllowedInTrial,
+    isPermanent,
+    hasPaidPlan,
+    startApiTrial,
+    isLoading: isLoadingTrialStatus
+  } = useTrialApiStatus();
   
   const [isCheckingConnection, setIsCheckingConnection] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -105,22 +119,8 @@ export function WhatsAppSellerConfig() {
     setTimeout(() => setShowCelebration(false), 5000);
   }, []);
 
-  // Check if user has a paid plan (not in free trial)
-  const hasPaidPlan = (() => {
-    if (isAdmin) return true; // Admins always have access
-    if (!profile) return false;
-    
-    // is_permanent = true means they have permanent access
-    if (profile.is_permanent) return true;
-    
-    // subscription_expires_at set and not expired means paid plan
-    if (profile.subscription_expires_at) {
-      const expiresAt = new Date(profile.subscription_expires_at);
-      return expiresAt > new Date();
-    }
-    
-    return false;
-  })();
+  // API access is determined by the trial status hook
+  const canAccessApi = !trialApiBlocked || isPermanent || (hasPaidPlan && !isInTrial);
 
   // Load instance into form
   useEffect(() => {
@@ -483,16 +483,11 @@ export function WhatsAppSellerConfig() {
     );
   }
 
-  // Show warning if user doesn't have a paid plan (free trial)
-  if (!hasPaidPlan) {
+  // Show warning if user's API is blocked (trial expired or no access)
+  if (!canAccessApi) {
     return (
       <div className="space-y-4">
-        <Alert className="border-amber-500 bg-amber-500/10">
-          <Lock className="h-4 w-4 text-amber-500" />
-          <AlertDescription className="font-medium text-amber-700 dark:text-amber-400">
-            🔒 Recurso Exclusivo para Planos Pagos
-          </AlertDescription>
-        </Alert>
+        <TrialStatusBanner />
         
         <div className="p-6 rounded-lg bg-amber-500/10 border border-amber-500/30 text-center space-y-4">
           <div className="w-16 h-16 mx-auto rounded-full bg-amber-500/20 flex items-center justify-center">
@@ -500,10 +495,12 @@ export function WhatsAppSellerConfig() {
           </div>
           <div>
             <h3 className="font-bold text-lg text-amber-700 dark:text-amber-400">
-              API de WhatsApp Indisponível no Teste Grátis
+              {trialBlockReason || 'WhatsApp API Indisponível'}
             </h3>
             <p className="text-sm text-muted-foreground mt-2">
-              O envio automático de mensagens via WhatsApp está disponível apenas para usuários com planos pagos.
+              {isInTrial 
+                ? 'Ative seu plano para liberar o envio automático de mensagens.'
+                : 'O envio automático de mensagens via WhatsApp está disponível apenas para usuários com planos ativos.'}
             </p>
           </div>
           <div className="pt-4 border-t border-amber-500/20 space-y-2">

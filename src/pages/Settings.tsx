@@ -28,6 +28,7 @@ import {
   DollarSign,
   Monitor,
   ExternalLink,
+  Clock,
 } from 'lucide-react';
 import { LayoutGrid, Trash2, Smartphone } from 'lucide-react';
 import { format } from 'date-fns';
@@ -39,6 +40,7 @@ import { usePWA } from '@/hooks/usePWA';
 import { NotificationSettings } from '@/components/NotificationSettings';
 import { cn } from '@/lib/utils';
 import { ResellerAppsManager } from '@/components/ResellerAppsManager';
+import { AdminTrialSettings } from '@/components/AdminTrialSettings';
 
 // Setting item component for mobile-like appearance
 function SettingItem({ 
@@ -332,45 +334,9 @@ export default function Settings() {
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
   };
 
-  // Trial days settings view (Admin only)
+  // Trial settings view (Admin only) - using new component
   if (showTrialSettings && isAdmin) {
-    return (
-      <div className="space-y-6 animate-fade-in max-w-lg mx-auto">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="sm" onClick={() => setShowTrialSettings(false)}>
-            ← Voltar
-          </Button>
-          <h1 className="text-xl font-bold">Dias de Teste</h1>
-        </div>
-
-        <form onSubmit={handleTrialDaysSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="trial_days">Dias de Teste para Novos Revendedores</Label>
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-              <Input
-                id="trial_days"
-                type="number"
-                value={trialDays}
-                onChange={(e) => setTrialDays(e.target.value)}
-                placeholder="5"
-                min="1"
-                max="30"
-                step="1"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Novos revendedores terão acesso gratuito por este número de dias
-            </p>
-          </div>
-
-          <Button type="submit" className="w-full" disabled={updateTrialDaysMutation.isPending}>
-            <Save className="h-4 w-4 mr-2" />
-            Salvar Dias de Teste
-          </Button>
-        </form>
-      </div>
-    );
+    return <AdminTrialSettings onBack={() => setShowTrialSettings(false)} />;
   }
 
   // Price settings view (Admin only)
