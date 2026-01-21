@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { useChatbotV3 } from "@/hooks/useChatbotV3";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -68,16 +67,14 @@ export default function ChatbotV3() {
 
   if (isLoading) {
     return (
-      <AppLayout>
-        <div className="container mx-auto p-4 space-y-4">
-          <Skeleton className="h-8 w-48" />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
-            <Skeleton className="h-32" />
-          </div>
+      <div className="container mx-auto p-4 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
         </div>
-      </AppLayout>
+      </div>
     );
   }
 
@@ -217,8 +214,7 @@ export default function ChatbotV3() {
   };
 
   return (
-    <AppLayout>
-      <div className="container mx-auto p-4 max-w-7xl">
+    <div className="container mx-auto p-4 max-w-7xl">
         <div className="flex items-center gap-3 mb-6">
           <Bot className="h-8 w-8 text-primary" />
           <div>
@@ -722,6 +718,5 @@ export default function ChatbotV3() {
           </TabsContent>
         </Tabs>
       </div>
-    </AppLayout>
   );
 }
