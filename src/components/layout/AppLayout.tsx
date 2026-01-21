@@ -234,12 +234,15 @@ export function AppLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background w-full max-w-[100vw] overflow-x-hidden">
       {/* Trial Banner - shows for users in trial period */}
       {showTrialBanner && (
         <div 
-          className="fixed right-0 z-[60] transition-smooth safe-area-top"
-          style={!isMobile ? { left: sidebarWidth, top: 0 } : { left: 0, top: 'env(safe-area-inset-top)' }}
+          className="fixed right-0 z-[60] transition-smooth"
+          style={!isMobile 
+            ? { left: sidebarWidth, top: 0 } 
+            : { left: 0, right: 0, top: 'env(safe-area-inset-top)' }
+          }
         >
           <TrialBanner daysRemaining={trialInfo.daysRemaining} />
         </div>
@@ -282,16 +285,16 @@ export function AppLayout() {
       <Sidebar />
       <main 
         className={cn(
-          "min-h-screen transition-smooth",
-          showTrialBanner ? "pt-20 sm:pt-[88px]" : "pt-14 sm:pt-12"
+          "min-h-screen transition-smooth w-full",
+          showTrialBanner ? "pt-16 sm:pt-[88px]" : "pt-12 sm:pt-12"
         )}
         style={{
           paddingLeft: !isMobile ? sidebarWidth : undefined,
-          paddingBottom: isMobile ? 'calc(5rem + env(safe-area-inset-bottom))' : undefined
+          paddingBottom: isMobile ? 'calc(5.5rem + env(safe-area-inset-bottom))' : undefined
         }}
       >
         <div className={cn(
-          "p-responsive animate-fade-in min-h-full",
+          "p-3 sm:p-4 lg:p-6 animate-fade-in min-h-full w-full max-w-full overflow-x-hidden",
           isMobile ? "pb-4" : ""
         )}>
           <Outlet />

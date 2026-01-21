@@ -37,11 +37,15 @@ export const BottomNavigation = forwardRef<HTMLElement, BottomNavigationProps>(
       <nav 
         ref={ref} 
         className="fixed bottom-0 left-0 right-0 z-50"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        style={{ 
+          paddingBottom: 'env(safe-area-inset-bottom)',
+          paddingLeft: 'env(safe-area-inset-left)',
+          paddingRight: 'env(safe-area-inset-right)'
+        }}
       >
-        <div className="mx-3 mb-2">
+        <div className="mx-2 mb-2 sm:mx-3">
           <div className="bg-gradient-to-r from-sidebar via-sidebar to-sidebar/95 border border-sidebar-border/50 rounded-2xl shadow-2xl shadow-black/20 backdrop-blur-xl">
-            <div className="flex items-center justify-between h-14 px-1.5">
+            <div className="flex items-center justify-between h-16 sm:h-14 px-1">
               {/* Quick Nav Items */}
               <div className="flex items-center flex-1 justify-around">
                 {quickNavItems.map((item) => {
@@ -51,14 +55,14 @@ export const BottomNavigation = forwardRef<HTMLElement, BottomNavigationProps>(
                       key={item.href}
                       onClick={() => navigate(item.href)}
                       className={cn(
-                        'flex flex-col items-center justify-center gap-0.5 min-w-[3rem] min-h-[3rem] px-2 py-1 rounded-xl transition-smooth active:scale-95',
+                        'flex flex-col items-center justify-center gap-1 min-w-[3.5rem] sm:min-w-[3rem] min-h-[3.5rem] sm:min-h-[3rem] px-1.5 py-1.5 rounded-xl transition-smooth active:scale-95 touch-target',
                         isActive
                           ? 'text-primary bg-primary/10'
                           : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                       )}
                     >
-                      <item.icon className="h-5 w-5" />
-                      <span className="text-[10px] font-medium leading-none">{item.label}</span>
+                      <item.icon className="h-5 w-5 flex-shrink-0" />
+                      <span className="text-[9px] sm:text-[10px] font-medium leading-none truncate max-w-full">{item.label}</span>
                     </button>
                   );
                 })}
@@ -68,7 +72,7 @@ export const BottomNavigation = forwardRef<HTMLElement, BottomNavigationProps>(
               <button
                 onClick={onMenuClick}
                 className={cn(
-                  'flex flex-col items-center justify-center gap-0.5 min-w-[3rem] min-h-[3rem] px-3 py-1 rounded-xl',
+                  'flex flex-col items-center justify-center gap-1 min-w-[3.5rem] sm:min-w-[3rem] min-h-[3.5rem] sm:min-h-[3rem] px-2 py-1.5 rounded-xl touch-target',
                   'bg-gradient-to-r from-primary/20 to-primary/10',
                   'text-primary',
                   'hover:from-primary/30 hover:to-primary/15',
@@ -76,8 +80,8 @@ export const BottomNavigation = forwardRef<HTMLElement, BottomNavigationProps>(
                   'border border-primary/20'
                 )}
               >
-                <Menu className="h-5 w-5" />
-                <span className="text-[10px] font-medium leading-none">Menu</span>
+                <Menu className="h-5 w-5 flex-shrink-0" />
+                <span className="text-[9px] sm:text-[10px] font-medium leading-none">Menu</span>
               </button>
             </div>
           </div>
