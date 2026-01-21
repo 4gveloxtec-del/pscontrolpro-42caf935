@@ -12,13 +12,13 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { Bot, Plus, Settings, MessageSquare, Users, History, Pencil, Trash2, Copy, Zap, Image, List, LayoutGrid, Loader2, AlertCircle, CheckCircle2, Folder, GitBranch } from 'lucide-react';
+import { Bot, Plus, Settings, MessageSquare, Users, History, Pencil, Trash2, Copy, Zap, Image, List, LayoutGrid, Loader2, AlertCircle, CheckCircle2, Folder, GitBranch, Menu, ArrowRight } from 'lucide-react';
 import { useChatbotRules, ChatbotRule, ChatbotTemplate } from '@/hooks/useChatbotRules';
 import { useChatbotCategories, ChatbotCategory } from '@/hooks/useChatbotCategories';
 import { ChatbotCategories } from '@/components/ChatbotCategories';
 import { ChatbotFlowManager } from '@/components/ChatbotFlowManager';
 import { useAuth } from '@/hooks/useAuth';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -294,6 +294,31 @@ export default function Chatbot() {
 
   return (
     <div className="space-y-6">
+      {/* Banner para Menu Interativo */}
+      <Card className="bg-gradient-to-r from-primary/10 to-primary/5 border-primary/20">
+        <CardContent className="py-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-primary/20 rounded-lg">
+                <Menu className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Menu Interativo</h3>
+                <p className="text-sm text-muted-foreground">
+                  Configure menus com navegação por números, variáveis dinâmicas e simulador
+                </p>
+              </div>
+            </div>
+            <Button asChild>
+              <Link to="/seller-chatbot-menu">
+                Acessar Menu Interativo
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Link>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
