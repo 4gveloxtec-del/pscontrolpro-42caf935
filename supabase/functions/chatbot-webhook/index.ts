@@ -1074,11 +1074,18 @@ function normalizeApiUrl(url: string): string {
 
 function formatPhone(phone: string): string {
   let formatted = (phone || "").replace(/\D/g, "");
+  
+  // Remove @s.whatsapp.net or @c.us if present
+  formatted = formatted.split("@")[0];
 
-  if (formatted.startsWith("55")) return formatted;
-
-  if (formatted.length === 10 || formatted.length === 11) {
-    return `55${formatted}`;
+  // Ensure it starts with country code
+  if (!formatted.startsWith("55") && (formatted.length === 10 || formatted.length === 11)) {
+    formatted = `55${formatted}`;
+  }
+  
+  // Remove leading zeros after country code (Brazilian numbers shouldn't have leading 0)
+  if (formatted.startsWith("550")) {
+    formatted = "55" + formatted.substring(3);
   }
 
   return formatted;
@@ -1231,7 +1238,8 @@ async function sendTextMessage(
 
     console.log(`[sendTextMessage] Sending to ${formattedPhone} via ${instanceName}`);
 
-    const response = await fetchWithRetry(url, {
+    // Try with formatted phone first
+    let response = await fetchWithRetry(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1243,11 +1251,56 @@ async function sendTextMessage(
       }),
     });
 
-    const responseText = await response.text();
+    let responseText = await response.text();
     
-    // Log detailed error for 400
+    // If 400, try alternate phone formats
     if (response.status === 400) {
-      console.error(`[sendTextMessage] BAD REQUEST (400) - Instance: ${instanceName}, Phone: ${formattedPhone}, Response: ${responseText}`);
+      console.log(`[sendTextMessage] Retrying with alternate formats for ${formattedPhone}`);
+      
+      // Try different number formats
+      const alternateFormats = [
+        formattedPhone + "@s.whatsapp.net", // Full JID format
+        formattedPhone.replace(/^55/, ""), // Without country code  
+        "55" + formattedPhone.replace(/^55/, ""), // Ensure 55 prefix
+      ];
+      
+      for (const altPhone of alternateFormats) {
+        try {
+          const altResponse = await fetchWithTimeout(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: globalConfig.api_token,
+            },
+            body: JSON.stringify({
+              number: altPhone,
+              text,
+            }),
+          }, 10000);
+          
+          if (altResponse.ok) {
+            console.log(`[sendTextMessage] Success with alternate format: ${altPhone}`);
+            responseText = await altResponse.text();
+            response = altResponse;
+            break;
+          }
+        } catch (e) {
+          // Continue trying other formats
+        }
+      }
+      
+      // Log detailed error if still failing
+      if (response.status === 400) {
+        console.error(`[sendTextMessage] BAD REQUEST (400) - Instance: ${instanceName}, Phone: ${formattedPhone}, Response: ${responseText}`);
+        
+        // Parse error for more details
+        try {
+          const errorData = JSON.parse(responseText);
+          console.error(`[sendTextMessage] Error details:`, JSON.stringify(errorData, null, 2));
+        } catch (e) {
+          // Not JSON
+        }
+      }
     }
     
     if (supabase && sellerId) {
@@ -1259,7 +1312,7 @@ async function sendTextMessage(
         "text",
         response.ok,
         response.status,
-        responseText,
+        responseText?.substring(0, 500),
         response.ok ? undefined : `Falha ao enviar: ${response.statusText}`
       );
     }
@@ -1298,7 +1351,9 @@ async function sendImageMessage(
     const formattedPhone = formatPhone(phone);
     const url = `${baseUrl}/message/sendMedia/${instanceName}`;
 
-    const response = await fetchWithRetry(url, {
+    console.log(`[sendImageMessage] Sending to ${formattedPhone} via ${instanceName}`);
+
+    let response = await fetchWithRetry(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1311,6 +1366,40 @@ async function sendImageMessage(
         caption: text,
       }),
     });
+
+    // If 400, try alternate phone formats
+    if (response.status === 400) {
+      const alternateFormats = [
+        formattedPhone + "@s.whatsapp.net",
+        formattedPhone.replace(/^55/, ""),
+        "55" + formattedPhone.replace(/^55/, ""),
+      ];
+      
+      for (const altPhone of alternateFormats) {
+        try {
+          const altResponse = await fetchWithTimeout(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: globalConfig.api_token,
+            },
+            body: JSON.stringify({
+              number: altPhone,
+              mediatype: "image",
+              media: imageUrl,
+              caption: text,
+            }),
+          }, 10000);
+          
+          if (altResponse.ok) {
+            console.log(`[sendImageMessage] Success with alternate format: ${altPhone}`);
+            return true;
+          }
+        } catch (e) {
+          // Continue trying
+        }
+      }
+    }
 
     return response.ok;
   } catch (error) {
@@ -1534,7 +1623,7 @@ Deno.serve(async (req) => {
             status: "ok", 
             message: "Chatbot webhook is online",
             timestamp: new Date().toISOString(),
-            version: "2.2.0",
+            version: "2.4.0",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
@@ -1586,7 +1675,7 @@ Deno.serve(async (req) => {
           return new Response(
             JSON.stringify({
               status: "diagnostic",
-              version: "2.2.0",
+              version: "2.4.0",
               timestamp: new Date().toISOString(),
               globalConfig: globalConfig ? {
                 hasConfig: true,
@@ -1729,7 +1818,7 @@ Deno.serve(async (req) => {
         return new Response(
           JSON.stringify({
             status: "diagnostic",
-            version: "2.3.0",
+            version: "2.4.0",
             timestamp: new Date().toISOString(),
             globalConfig: globalConfig ? {
               hasConfig: true,
