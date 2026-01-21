@@ -269,13 +269,13 @@ export default function Dashboard() {
     });
   };
 
-  // Clients expiring from 1 to 5 days, sorted by days remaining
+  // Clients expiring from 0 to 7 days (used for cobrança em massa), sorted by days remaining
   const urgentClients = clients
     .map(c => ({
       ...c,
       daysRemaining: differenceInDays(new Date(c.expiration_date), today)
     }))
-    .filter(c => c.daysRemaining >= 0 && c.daysRemaining <= 5)
+    .filter(c => c.daysRemaining >= 0 && c.daysRemaining <= 7)
     .sort((a, b) => a.daysRemaining - b.daysRemaining);
 
   const expiringToday = getClientsExpiringInDays(0);
@@ -284,6 +284,8 @@ export default function Dashboard() {
   const expiring3Days = getClientsExpiringInDays(3);
   const expiring4Days = getClientsExpiringInDays(4);
   const expiring5Days = getClientsExpiringInDays(5);
+  const expiring6Days = getClientsExpiringInDays(6);
+  const expiring7Days = getClientsExpiringInDays(7);
 
   // Filter clients based on selected expiration filter
   const filteredUrgentClients = expirationFilter !== null 
@@ -469,7 +471,7 @@ export default function Dashboard() {
       {isSeller && (
         <>
           {/* Urgent Notifications - Clickable Cards */}
-          {(expiringToday.length > 0 || expiring1Day.length > 0 || expiring2Days.length > 0 || expiring3Days.length > 0 || expiring4Days.length > 0 || expiring5Days.length > 0) && (
+           {(expiringToday.length > 0 || expiring1Day.length > 0 || expiring2Days.length > 0 || expiring3Days.length > 0 || expiring4Days.length > 0 || expiring5Days.length > 0 || expiring6Days.length > 0 || expiring7Days.length > 0) && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -488,7 +490,7 @@ export default function Dashboard() {
                   </Button>
                 )}
               </div>
-              <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+               <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-7">
                 {expiringToday.length > 0 && (
                   <Card 
                     className={cn(
@@ -599,6 +601,26 @@ export default function Dashboard() {
                       <div>
                         <p className="text-xs text-muted-foreground/70 font-medium">{getExpirationCardLabel(5)}</p>
                         <p className="text-xl font-bold text-muted-foreground/70">{expiring5Days.length}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {expiring7Days.length > 0 && (
+                  <Card 
+                    className={cn(
+                      "border-muted bg-muted/5 cursor-pointer transition-all hover:scale-105 hover:shadow-lg",
+                      expirationFilter === 7 && "ring-2 ring-muted-foreground ring-offset-2 ring-offset-background"
+                    )}
+                    onClick={() => handleExpirationCardClick(7)}
+                  >
+                    <CardContent className="p-3 flex items-center gap-3">
+                      <div className="p-2 rounded-full bg-muted/10">
+                        <Clock className="h-4 w-4 text-muted-foreground/70" />
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted-foreground/70 font-medium">{getExpirationCardLabel(7)}</p>
+                        <p className="text-xl font-bold text-muted-foreground/70">{expiring7Days.length}</p>
                       </div>
                     </CardContent>
                   </Card>
@@ -1159,7 +1181,7 @@ export default function Dashboard() {
         clients={filteredUrgentClients}
         filterLabel={expirationFilter !== null 
           ? `vencendo ${expirationFilter === 0 ? 'hoje' : expirationFilter === 1 ? 'amanhã' : `em ${expirationFilter} dias`}`
-          : 'vencendo em 0-5 dias'
+          : 'vencendo em 0-7 dias'
         }
       />
     </div>

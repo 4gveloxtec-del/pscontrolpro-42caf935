@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { differenceInDays, startOfToday } from 'date-fns';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -84,6 +85,7 @@ export function AdminBroadcastResellers() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'expired'>('all');
+  const [onlyExpiringWithin7Days, setOnlyExpiringWithin7Days] = useState(true);
 
   // Fetch sellers with WhatsApp and plan info
   const { data: allSellers = [] } = useQuery({
@@ -202,6 +204,22 @@ export function AdminBroadcastResellers() {
   const filteredSellers = useMemo(() => {
     let filtered = allSellers;
 
+    // Optional: restrict to sellers expiring in up to 7 days (for cobrança/vencimento reminders)
+    const shouldApplyExpiringSoonFilter =
+      onlyExpiringWithin7Days &&
+      statusFilter !== 'expired' &&
+      (selectedCategory === 'billing' || selectedCategory === 'expiring');
+
+    if (shouldApplyExpiringSoonFilter) {
+      const today = startOfToday();
+      filtered = filtered.filter(s => {
+        if (s.is_permanent) return false;
+        if (!s.subscription_expires_at) return false;
+        const days = differenceInDays(new Date(s.subscription_expires_at), today);
+        return days >= 0 && days <= 7;
+      });
+    }
+
     // Filter by active status
     if (statusFilter === 'active') {
       filtered = filtered.filter(s => {
@@ -229,7 +247,7 @@ export function AdminBroadcastResellers() {
     }
 
     return filtered;
-  }, [allSellers, selectedPeriods, statusFilter]);
+  }, [allSellers, selectedPeriods, statusFilter, selectedCategory, onlyExpiringWithin7Days]);
 
   // Fetch recent broadcasts
   const { data: broadcasts = [] } = useQuery({
@@ -393,11 +411,22 @@ Qualquer dúvida estamos à disposição!`;
         const seller = filteredSellers.find(s => s.id === recipient.seller_id);
         if (!seller?.whatsapp) continue;
 
+        const today = startOfToday();
+        const daysLeft = seller.subscription_expires_at
+          ? differenceInDays(new Date(seller.subscription_expires_at), today)
+          : null;
+        const vencimento = seller.subscription_expires_at
+          ? new Date(seller.subscription_expires_at).toLocaleDateString('pt-BR')
+          : '';
+
         // Replace variables in message
         const personalizedMessage = message
           .replace(/{nome}/g, seller.full_name || seller.email.split('@')[0])
           .replace(/{email}/g, seller.email)
-          .replace(/{whatsapp}/g, seller.whatsapp);
+          .replace(/{whatsapp}/g, seller.whatsapp)
+          .replace(/\{dias\}/g, daysLeft === null ? '' : String(daysLeft))
+          .replace(/\{dias_restantes\}/g, daysLeft === null ? '' : String(daysLeft))
+          .replace(/\{vencimento\}/g, vencimento);
 
         let sent = false;
 
@@ -611,6 +640,22 @@ Qualquer dúvida estamos à disposição!`;
                 </Select>
               </div>
 
+              {/* 7-day window (ADM -> revendedores) */}
+              {(selectedCategory === 'billing' || selectedCategory === 'expiring') && statusFilter !== 'expired' && (
+                <div className="flex items-center gap-2 rounded-lg border p-3">
+                  <Checkbox
+                    checked={onlyExpiringWithin7Days}
+                    onCheckedChange={(v) => setOnlyExpiringWithin7Days(Boolean(v))}
+                  />
+                  <div className="text-sm">
+                    <p className="font-medium">Somente vencendo em até 7 dias</p>
+                    <p className="text-xs text-muted-foreground">
+                      Ideal para lembretes de cobrança (7 dias antes)
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Template Selection */}
               {filteredTemplates.length > 0 && (
                 <div className="space-y-2">
@@ -723,7 +768,7 @@ Qualquer dúvida estamos à disposição!`;
               className="font-mono text-sm"
             />
             <p className="text-xs text-muted-foreground">
-              Variáveis: {'{nome}'}, {'{email}'}, {'{whatsapp}'}
+              Variáveis: {'{nome}'}, {'{email}'}, {'{whatsapp}'}, {'{dias}'}, {'{vencimento}'}
             </p>
             <Button
               variant="ghost"
