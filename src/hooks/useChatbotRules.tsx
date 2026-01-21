@@ -91,8 +91,9 @@ export interface ChatbotInteraction {
   block_reason?: string;
 }
 
-export function useChatbotRules() {
+export function useChatbotRules(options?: { enabled?: boolean }) {
   const { user, isAdmin } = useAuth();
+  const enabled = options?.enabled ?? true;
   const [rules, setRules] = useState<ChatbotRule[]>([]);
   const [templates, setTemplates] = useState<ChatbotTemplate[]>([]);
   const [settings, setSettings] = useState<ChatbotSettings | null>(null);
@@ -189,6 +190,13 @@ export function useChatbotRules() {
   }, [user]);
 
   useEffect(() => {
+    if (!enabled) {
+      // Etapa 3 (frontend lock): when legacy is not the active chatbot, do not fetch or initialize.
+      // Keep state stable but ensure loading is false.
+      setIsLoading(false);
+      return;
+    }
+
     if (user) {
       setIsLoading(true);
       Promise.all([
@@ -200,7 +208,7 @@ export function useChatbotRules() {
       ]).finally(() => setIsLoading(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, enabled]);
 
   // CRUD operations
   const createRule = async (rule: Omit<ChatbotRule, 'id' | 'seller_id' | 'created_at' | 'updated_at'>) => {
