@@ -7,11 +7,12 @@
  * 
  * IMPORTANT: This SW is designed to NOT break the app in production.
  * It will gracefully handle errors and allow the app to function normally.
+ * Cache is cleared on every install to ensure fresh deploys work correctly.
  * 
- * Version: 2.0.0 - Vercel/Production compatible
+ * Version: 3.0.0 - Vercel/Production/Deploy compatible
  */
 
-const SW_VERSION = 'prod-safe-v2';
+const SW_VERSION = 'prod-safe-v3';
 
 // Wrap everything in try-catch to prevent SW from breaking the app
 try {
