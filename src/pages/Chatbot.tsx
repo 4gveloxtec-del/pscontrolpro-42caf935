@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,8 @@ import { Navigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 
 const COOLDOWN_MODES = {
   polite: { label: 'Educado (*)', description: '1 resposta a cada 24h', asterisks: '*' },
@@ -51,6 +53,49 @@ export default function Chatbot() {
     return <Navigate to="/admin/chatbot" replace />;
   }
 
+  // ============================================================
+  // ETAPA 3 — SILENCIAMENTO DO CHATBOT LEGADO (FRONTEND)
+  // Regra: se a versão ativa do chatbot != "legacy", este componente não deve inicializar.
+  // Fonte de verdade (sem criar flags): seller_chatbot_settings + existência de seller_chatbot_menu.
+  // Default seguro: assume V3 até conseguir validar o contrário.
+  // ============================================================
+
+  const { data: activeChatbotVersion = 'v3' } = useQuery({
+    queryKey: ['active-chatbot-version', user?.id],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      if (!user?.id) return 'v3' as const;
+
+      const { data: settings } = await supabase
+        .from('seller_chatbot_settings')
+        .select('menu_enabled, is_enabled')
+        .eq('seller_id', user.id)
+        .maybeSingle();
+
+      const menuEnabled = (settings as any)?.menu_enabled !== false && (settings as any)?.is_enabled !== false;
+
+      // Exists at least 1 active node? (cheap existence check)
+      const { data: nodes } = await supabase
+        .from('seller_chatbot_menu')
+        .select('id')
+        .eq('seller_id', user.id)
+        .eq('is_active', true)
+        .limit(1);
+
+      const hasNodes = !!(nodes && nodes.length > 0);
+      return menuEnabled && hasNodes ? ('v3' as const) : ('legacy' as const);
+    },
+    staleTime: 10_000,
+    gcTime: 60_000,
+  });
+
+  const legacyEnabled = useMemo(() => activeChatbotVersion === 'legacy', [activeChatbotVersion]);
+
+  if (!legacyEnabled) {
+    // V3 ativo => legado totalmente inativo (sem hooks, sem fetch, sem listeners)
+    return null;
+  }
+
   const {
     rules,
     templates,
@@ -66,7 +111,7 @@ export default function Chatbot() {
     updateTemplate,
     deleteTemplate,
     createRuleFromTemplate,
-  } = useChatbotRules();
+  } = useChatbotRules({ enabled: legacyEnabled });
 
   const [activeTab, setActiveTab] = useState('rules');
   const [showRuleDialog, setShowRuleDialog] = useState(false);
