@@ -2106,6 +2106,53 @@ export type Database = {
         }
         Relationships: []
       }
+      operational_alerts: {
+        Row: {
+          alert_type: string
+          component: string
+          created_at: string
+          details: Json | null
+          id: string
+          is_resolved: boolean | null
+          message: string
+          resolved_at: string | null
+          seller_id: string | null
+          severity: string
+        }
+        Insert: {
+          alert_type: string
+          component: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          is_resolved?: boolean | null
+          message: string
+          resolved_at?: string | null
+          seller_id?: string | null
+          severity?: string
+        }
+        Update: {
+          alert_type?: string
+          component?: string
+          created_at?: string
+          details?: Json | null
+          id?: string
+          is_resolved?: boolean | null
+          message?: string
+          resolved_at?: string | null
+          seller_id?: string | null
+          severity?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operational_alerts_seller_id_fkey"
+            columns: ["seller_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       panel_clients: {
         Row: {
           assigned_at: string | null
@@ -3410,6 +3457,17 @@ export type Database = {
       create_default_templates_for_seller: {
         Args: { seller_uuid: string }
         Returns: undefined
+      }
+      create_operational_alert: {
+        Args: {
+          p_alert_type: string
+          p_component: string
+          p_details?: Json
+          p_message: string
+          p_seller_id: string
+          p_severity: string
+        }
+        Returns: string
       }
       create_panel_reseller_templates_for_seller: {
         Args: { seller_uuid: string }

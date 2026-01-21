@@ -252,6 +252,8 @@ Deno.serve(async (req) => {
         .single();
 
 
+      console.log(`[bulk] seller_id=${effectiveSellerId} action=start job_id=${newJob.id} total_clients=${clients.length} status=ok`);
+
       // Start processing in background (fire and forget)
       processJob(supabase, newJob.id).catch(console.error);
 
@@ -507,6 +509,7 @@ async function processJob(supabase: any, jobId: string) {
         .maybeSingle();
 
       if (alreadyTracked?.id) {
+        console.log(`[bulk] seller_id=${job.seller_id} action=skip_duplicate client_id=${client.id} status=deduped`);
         successCount++;
         await updateJobProgress(supabase, jobId, i + 1, successCount, errorCount);
         if (i < clients.length - 1) {
@@ -536,7 +539,19 @@ async function processJob(supabase: any, jobId: string) {
         });
       } else {
         errorCount++;
-        console.log('Failed to send message, error:', result.error);
+        console.log(`[bulk] seller_id=${job.seller_id} action=send_message status=error phone=${phone} error=${result.error}`);
+        
+        // Log operational alert for repeated failures
+        if (errorCount > 3 && errorCount % 5 === 0) {
+          await supabase.rpc('create_operational_alert', {
+            p_seller_id: job.seller_id,
+            p_alert_type: 'repeated_failure',
+            p_severity: 'warning',
+            p_component: 'bulk_collection',
+            p_message: `${errorCount} falhas de envio no job de cobrança em massa`,
+            p_details: { job_id: jobId, error_count: errorCount, last_error: result.error }
+          });
+        }
       }
 
       // Update progress
