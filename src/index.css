@@ -258,6 +258,8 @@
     scroll-behavior: smooth;
     -webkit-text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+    /* Prevent horizontal overflow */
+    overflow-x: hidden;
   }
 
   body {
@@ -268,13 +270,17 @@
     /* Allow normal scroll behavior */
     overflow-y: auto;
     overflow-x: hidden;
-    /* Safe area insets */
+    /* Safe area insets for notch/home indicator */
     padding-top: env(safe-area-inset-top);
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
-    /* Ensure minimum height for scrolling */
+    padding-bottom: env(safe-area-inset-bottom);
+    /* Ensure minimum height fills screen */
     min-height: 100vh;
     min-height: 100dvh;
+    /* Prevent content from being cut off */
+    width: 100%;
+    max-width: 100vw;
   }
 
   /* Safe area utilities */
@@ -284,10 +290,22 @@
   .safe-area-pr { padding-right: env(safe-area-inset-right); }
   .safe-area-top { top: env(safe-area-inset-top); }
   .safe-area-bottom { bottom: env(safe-area-inset-bottom); }
+  .safe-area-inset-all {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
 
-  /* Touch-friendly sizing */
+  /* Touch-friendly sizing - minimum 44px for accessibility */
   button, [role="button"], input, select, textarea {
     touch-action: manipulation;
+  }
+
+  /* Ensure touch targets are large enough */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
   }
 
   /* Prevent text selection on interactive elements */
@@ -296,9 +314,15 @@
     user-select: none;
   }
 
-  /* Better input handling on mobile */
+  /* Better input handling on mobile - 16px prevents iOS zoom */
   input, textarea, select {
-    font-size: 16px; /* Prevents zoom on iOS */
+    font-size: 16px !important;
+  }
+
+  @media (min-width: 640px) {
+    input, textarea, select {
+      font-size: inherit !important;
+    }
   }
 
   /* Scrollbar styling - hidden on mobile, visible on desktop */
@@ -349,7 +373,7 @@
   }
 
   .container-mobile {
-    @apply px-4 sm:px-6 lg:px-8;
+    @apply px-3 sm:px-4 lg:px-6;
     width: 100%;
     max-width: 100%;
   }
@@ -362,22 +386,22 @@
     }
   }
 
-  /* Responsive text scaling */
-  .text-responsive-xs { @apply text-xs sm:text-sm; }
-  .text-responsive-sm { @apply text-sm sm:text-base; }
-  .text-responsive-base { @apply text-base sm:text-lg; }
-  .text-responsive-lg { @apply text-lg sm:text-xl lg:text-2xl; }
-  .text-responsive-xl { @apply text-xl sm:text-2xl lg:text-3xl; }
-  .text-responsive-2xl { @apply text-2xl sm:text-3xl lg:text-4xl; }
+  /* Responsive text scaling - mobile first */
+  .text-responsive-xs { @apply text-[11px] sm:text-xs lg:text-sm; }
+  .text-responsive-sm { @apply text-xs sm:text-sm lg:text-base; }
+  .text-responsive-base { @apply text-sm sm:text-base lg:text-lg; }
+  .text-responsive-lg { @apply text-base sm:text-lg lg:text-xl; }
+  .text-responsive-xl { @apply text-lg sm:text-xl lg:text-2xl; }
+  .text-responsive-2xl { @apply text-xl sm:text-2xl lg:text-3xl; }
 
-  /* Gap responsive */
-  .gap-responsive { @apply gap-3 sm:gap-4 lg:gap-6; }
-  .gap-responsive-sm { @apply gap-2 sm:gap-3 lg:gap-4; }
+  /* Gap responsive - tighter on mobile */
+  .gap-responsive { @apply gap-2 sm:gap-3 lg:gap-4; }
+  .gap-responsive-sm { @apply gap-1.5 sm:gap-2 lg:gap-3; }
 
-  /* Padding responsive */
+  /* Padding responsive - tighter on mobile */
   .p-responsive { @apply p-3 sm:p-4 lg:p-6; }
   .px-responsive { @apply px-3 sm:px-4 lg:px-6; }
-  .py-responsive { @apply py-3 sm:py-4 lg:py-6; }
+  .py-responsive { @apply py-2 sm:py-3 lg:py-4; }
 
   /* Smooth hardware-accelerated transitions */
   .transition-smooth {
@@ -395,6 +419,35 @@
     -webkit-overflow-scrolling: touch;
     overflow-y: auto;
     overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  /* Modal/Dialog specific scroll container */
+  .modal-scroll {
+    -webkit-overflow-scrolling: touch;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
+    max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 4rem);
+  }
+
+  @media (min-width: 640px) {
+    .modal-scroll {
+      max-height: 80vh;
+    }
+  }
+
+  /* Form field container - ensures visibility */
+  .form-field {
+    @apply w-full min-w-0;
+  }
+
+  /* Prevent content overflow */
+  .overflow-safe {
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    hyphens: auto;
   }
 }
 
@@ -472,6 +525,39 @@ main, [role="main"] {
   /* Card responsive */
   .card-responsive {
     @apply rounded-lg sm:rounded-xl;
+  }
+
+  /* Mobile-optimized form grid */
+  .form-grid {
+    @apply grid gap-3 sm:gap-4;
+  }
+
+  .form-grid-2 {
+    @apply grid gap-3 sm:gap-4 sm:grid-cols-2;
+  }
+
+  .form-grid-3 {
+    @apply grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3;
+  }
+
+  /* Dialog/Modal form container */
+  .dialog-form {
+    @apply space-y-3 sm:space-y-4 w-full;
+  }
+
+  /* Prevent text overflow in tight spaces */
+  .text-truncate-mobile {
+    @apply truncate sm:whitespace-normal sm:overflow-visible;
+  }
+
+  /* Responsive stack - column on mobile, row on larger */
+  .stack-responsive {
+    @apply flex flex-col sm:flex-row gap-2 sm:gap-3;
+  }
+
+  /* Button group responsive */
+  .button-group-responsive {
+    @apply flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto sm:justify-end;
   }
 
   .animate-fade-in {
