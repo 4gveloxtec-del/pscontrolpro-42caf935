@@ -130,7 +130,7 @@ function PasswordUpdateGuard({ children }: { children: React.ReactNode }) {
 
 const AppRoutes = () => {
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AdminManifestProvider>
       <Suspense fallback={<PageLoader />}>
       <Routes>
