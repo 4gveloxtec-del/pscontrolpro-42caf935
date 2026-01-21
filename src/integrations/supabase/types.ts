@@ -987,6 +987,299 @@ export type Database = {
         }
         Relationships: []
       }
+      chatbot_v3_config: {
+        Row: {
+          created_at: string | null
+          fallback_message: string | null
+          id: string
+          ignore_groups: boolean | null
+          is_enabled: boolean | null
+          response_delay_max: number | null
+          response_delay_min: number | null
+          typing_enabled: boolean | null
+          updated_at: string | null
+          user_id: string
+          welcome_message: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          fallback_message?: string | null
+          id?: string
+          ignore_groups?: boolean | null
+          is_enabled?: boolean | null
+          response_delay_max?: number | null
+          response_delay_min?: number | null
+          typing_enabled?: boolean | null
+          updated_at?: string | null
+          user_id: string
+          welcome_message?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          fallback_message?: string | null
+          id?: string
+          ignore_groups?: boolean | null
+          is_enabled?: boolean | null
+          response_delay_max?: number | null
+          response_delay_min?: number | null
+          typing_enabled?: boolean | null
+          updated_at?: string | null
+          user_id?: string
+          welcome_message?: string | null
+        }
+        Relationships: []
+      }
+      chatbot_v3_contacts: {
+        Row: {
+          awaiting_human: boolean | null
+          created_at: string | null
+          current_menu_key: string | null
+          id: string
+          interaction_count: number | null
+          last_message_at: string | null
+          last_response_at: string | null
+          name: string | null
+          phone: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          awaiting_human?: boolean | null
+          created_at?: string | null
+          current_menu_key?: string | null
+          id?: string
+          interaction_count?: number | null
+          last_message_at?: string | null
+          last_response_at?: string | null
+          name?: string | null
+          phone: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          awaiting_human?: boolean | null
+          created_at?: string | null
+          current_menu_key?: string | null
+          id?: string
+          interaction_count?: number | null
+          last_message_at?: string | null
+          last_response_at?: string | null
+          name?: string | null
+          phone?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      chatbot_v3_logs: {
+        Row: {
+          contact_phone: string
+          created_at: string | null
+          id: string
+          incoming_message: string | null
+          menu_key: string | null
+          response_sent: string | null
+          trigger_matched: string | null
+          user_id: string
+          was_fallback: boolean | null
+        }
+        Insert: {
+          contact_phone: string
+          created_at?: string | null
+          id?: string
+          incoming_message?: string | null
+          menu_key?: string | null
+          response_sent?: string | null
+          trigger_matched?: string | null
+          user_id: string
+          was_fallback?: boolean | null
+        }
+        Update: {
+          contact_phone?: string
+          created_at?: string | null
+          id?: string
+          incoming_message?: string | null
+          menu_key?: string | null
+          response_sent?: string | null
+          trigger_matched?: string | null
+          user_id?: string
+          was_fallback?: boolean | null
+        }
+        Relationships: []
+      }
+      chatbot_v3_menus: {
+        Row: {
+          created_at: string | null
+          id: string
+          image_url: string | null
+          is_active: boolean | null
+          menu_key: string
+          message_text: string
+          parent_menu_key: string | null
+          sort_order: number | null
+          title: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean | null
+          menu_key: string
+          message_text: string
+          parent_menu_key?: string | null
+          sort_order?: number | null
+          title: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean | null
+          menu_key?: string
+          message_text?: string
+          parent_menu_key?: string | null
+          sort_order?: number | null
+          title?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      chatbot_v3_options: {
+        Row: {
+          action_response: string | null
+          action_type: string | null
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          keywords: string[] | null
+          menu_id: string
+          option_number: number
+          option_text: string
+          sort_order: number | null
+          target_menu_key: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          action_response?: string | null
+          action_type?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          keywords?: string[] | null
+          menu_id: string
+          option_number: number
+          option_text: string
+          sort_order?: number | null
+          target_menu_key?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          action_response?: string | null
+          action_type?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          keywords?: string[] | null
+          menu_id?: string
+          option_number?: number
+          option_text?: string
+          sort_order?: number | null
+          target_menu_key?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chatbot_v3_options_menu_id_fkey"
+            columns: ["menu_id"]
+            isOneToOne: false
+            referencedRelation: "chatbot_v3_menus"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chatbot_v3_triggers: {
+        Row: {
+          action_type: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          keywords: string[]
+          priority: number | null
+          response_text: string | null
+          target_menu_key: string | null
+          trigger_name: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          action_type: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          keywords: string[]
+          priority?: number | null
+          response_text?: string | null
+          target_menu_key?: string | null
+          trigger_name: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          action_type?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          keywords?: string[]
+          priority?: number | null
+          response_text?: string | null
+          target_menu_key?: string | null
+          trigger_name?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      chatbot_v3_variables: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          id: string
+          is_system: boolean | null
+          updated_at: string | null
+          user_id: string
+          variable_key: string
+          variable_value: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_system?: boolean | null
+          updated_at?: string | null
+          user_id: string
+          variable_key: string
+          variable_value?: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_system?: boolean | null
+          updated_at?: string | null
+          user_id?: string
+          variable_key?: string
+          variable_value?: string
+        }
+        Relationships: []
+      }
       client_categories: {
         Row: {
           created_at: string | null
@@ -3040,6 +3333,10 @@ export type Database = {
       }
       create_default_chatbot_categories: {
         Args: { p_seller_id: string }
+        Returns: undefined
+      }
+      create_default_chatbot_v3: {
+        Args: { p_user_id: string }
         Returns: undefined
       }
       create_default_chatbot_variables: {
