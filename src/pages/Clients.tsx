@@ -32,8 +32,9 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Plus, Search, Phone, Mail, Calendar as CalendarIcon, CreditCard, User, Trash2, Edit, Eye, EyeOff, MessageCircle, RefreshCw, Lock, Loader2, Monitor, Smartphone, Tv, Gamepad2, Laptop, Flame, ChevronDown, ExternalLink, AppWindow, Send, Archive, RotateCcw, Sparkles, Server, Copy, UserPlus, WifiOff, CheckCircle, X, DollarSign, Globe } from 'lucide-react';
+import { Plus, Search, Phone, Mail, Calendar as CalendarIcon, CreditCard, User, Trash2, Edit, Eye, EyeOff, MessageCircle, RefreshCw, Lock, Loader2, Monitor, Smartphone, Tv, Gamepad2, Laptop, Flame, ChevronDown, ExternalLink, AppWindow, Send, Archive, RotateCcw, Sparkles, Server, Copy, UserPlus, WifiOff, CheckCircle, X, DollarSign, Globe, ArrowRightLeft } from 'lucide-react';
 import { BulkImportClients } from '@/components/BulkImportClients';
+import { BulkServerMigration } from '@/components/BulkServerMigration';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
@@ -216,6 +217,8 @@ export default function Clients() {
   const [showWelcomePreview, setShowWelcomePreview] = useState(false);
   const [pendingClientData, setPendingClientData] = useState<{ data: Record<string, unknown>; screens: string } | null>(null);
   const [customWelcomeMessage, setCustomWelcomeMessage] = useState<string | null>(null);
+  // State for bulk server migration
+  const [showMigrationDialog, setShowMigrationDialog] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -2942,14 +2945,25 @@ export default function Clients() {
               </SelectContent>
             </Select>
             {serverFilter !== 'all' && (
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                onClick={() => setServerFilter('all')}
-                className="h-8 px-2 text-xs"
-              >
-                Limpar
-              </Button>
+              <>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setServerFilter('all')}
+                  className="h-8 px-2 text-xs"
+                >
+                  Limpar
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowMigrationDialog(true)}
+                  className="h-8 px-2 text-xs gap-1"
+                >
+                  <ArrowRightLeft className="h-3 w-3" />
+                  Migrar ({clients.filter(c => c.server_id === serverFilter).length})
+                </Button>
+              </>
             )}
           </div>
         )}
@@ -3975,6 +3989,19 @@ export default function Clients() {
 
       {/* Global Confirm Dialog */}
       <ConfirmDialog {...dialogProps} />
+
+      {/* Bulk Server Migration Dialog */}
+      {serverFilter !== 'all' && user?.id && (
+        <BulkServerMigration
+          open={showMigrationDialog}
+          onOpenChange={setShowMigrationDialog}
+          sourceServerId={serverFilter}
+          sourceServerName={servers.find(s => s.id === serverFilter)?.name || ''}
+          servers={servers}
+          clientsToMigrate={clients.filter(c => c.server_id === serverFilter).map(c => ({ id: c.id, name: c.name }))}
+          userId={user.id}
+        />
+      )}
     </div>
   );
 }
