@@ -54,7 +54,7 @@ interface ServerData {
 
 export default function Dashboard() {
   const { user, profile, isAdmin, isSeller } = useAuth();
-  const { isPrivacyMode, maskData, isMoneyHidden, toggleMoneyVisibility } = usePrivacyMode();
+  const { isPrivacyMode, maskData, isMoneyHidden, toggleMoneyVisibility, isClientNumbersHidden, toggleClientNumbersVisibility } = usePrivacyMode();
   const [messageClient, setMessageClient] = useState<Client | null>(null);
   const [expirationFilter, setExpirationFilter] = useState<number | null>(null);
   const [bulkCollectionOpen, setBulkCollectionOpen] = useState(false);
@@ -641,28 +641,51 @@ export default function Dashboard() {
             </div>
           )}
 
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-lg font-semibold">Resumo de Clientes</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleClientNumbersVisibility}
+              className="gap-2"
+              title={isClientNumbersHidden ? "Mostrar números" : "Ocultar números"}
+            >
+              {isClientNumbersHidden ? (
+                <>
+                  <EyeOff className="h-4 w-4" />
+                  <span className="text-xs">Mostrar</span>
+                </>
+              ) : (
+                <>
+                  <Eye className="h-4 w-4" />
+                  <span className="text-xs">Ocultar</span>
+                </>
+              )}
+            </Button>
+          </div>
+
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <StatCard
               title="Total de Clientes"
-              value={isPrivacyMode ? '●●' : clients.length}
+              value={maskData(clients.length, 'number')}
               icon={Users}
               variant="primary"
             />
             <StatCard
               title="Clientes Ativos"
-              value={isPrivacyMode ? '●●' : activeClients.length}
+              value={maskData(activeClients.length, 'number')}
               icon={UserCheck}
               variant="success"
             />
             <StatCard
               title="Vencendo em 7 dias"
-              value={isPrivacyMode ? '●●' : expiringClients.length}
+              value={maskData(expiringClients.length, 'number')}
               icon={Clock}
               variant="warning"
             />
             <StatCard
               title="Vencidos"
-              value={isPrivacyMode ? '●●' : expiredClients.length}
+              value={maskData(expiredClients.length, 'number')}
               icon={AlertTriangle}
               variant="danger"
             />

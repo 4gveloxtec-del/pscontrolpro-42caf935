@@ -7,7 +7,9 @@ interface PrivacyModeContextType {
   togglePrivacyMode: () => void;
   isMoneyHidden: boolean;
   toggleMoneyVisibility: () => void;
-  maskData: (data: string | number | null | undefined, type?: 'name' | 'phone' | 'email' | 'money' | 'text') => string;
+  isClientNumbersHidden: boolean;
+  toggleClientNumbersVisibility: () => void;
+  maskData: (data: string | number | null | undefined, type?: 'name' | 'phone' | 'email' | 'money' | 'text' | 'number') => string;
 }
 
 const PrivacyModeContext = createContext<PrivacyModeContextType | undefined>(undefined);
@@ -21,11 +23,12 @@ export function PrivacyModeProvider({ children }: { children: ReactNode }) {
   });
 
   const [isMoneyHidden, setIsMoneyHidden] = useState(false);
+  const [isClientNumbersHidden, setIsClientNumbersHidden] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch hide_revenue preference from database when user logs in
+  // Fetch hide_revenue and hide_client_numbers preferences from database when user logs in
   useEffect(() => {
-    const fetchHideRevenue = async () => {
+    const fetchPreferences = async () => {
       if (!user?.id) {
         setIsLoading(false);
         return;
@@ -34,21 +37,22 @@ export function PrivacyModeProvider({ children }: { children: ReactNode }) {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('hide_revenue')
+          .select('hide_revenue, hide_client_numbers')
           .eq('id', user.id)
           .single();
 
         if (!error && data) {
           setIsMoneyHidden(data.hide_revenue ?? false);
+          setIsClientNumbersHidden(data.hide_client_numbers ?? false);
         }
       } catch (err) {
-        console.error('Error fetching hide_revenue:', err);
+        console.error('Error fetching privacy preferences:', err);
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchHideRevenue();
+    fetchPreferences();
   }, [user?.id]);
 
   useEffect(() => {
@@ -85,12 +89,43 @@ export function PrivacyModeProvider({ children }: { children: ReactNode }) {
     }
   }, [user?.id, isMoneyHidden]);
 
-  const maskData = (data: string | number | null | undefined, type: 'name' | 'phone' | 'email' | 'money' | 'text' = 'text'): string => {
+  const toggleClientNumbersVisibility = useCallback(async () => {
+    if (!user?.id) return;
+
+    const newValue = !isClientNumbersHidden;
+    
+    // Optimistic update
+    setIsClientNumbersHidden(newValue);
+
+    // Save to database
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ hide_client_numbers: newValue })
+        .eq('id', user.id);
+
+      if (error) {
+        console.error('Error saving hide_client_numbers:', error);
+        // Revert on error
+        setIsClientNumbersHidden(!newValue);
+      }
+    } catch (err) {
+      console.error('Error saving hide_client_numbers:', err);
+      setIsClientNumbersHidden(!newValue);
+    }
+  }, [user?.id, isClientNumbersHidden]);
+
+  const maskData = (data: string | number | null | undefined, type: 'name' | 'phone' | 'email' | 'money' | 'text' | 'number' = 'text'): string => {
     if (data === null || data === undefined) return '';
     
     // Para tipo 'money', verifica isMoneyHidden OU isPrivacyMode
     if (type === 'money' && (isMoneyHidden || isPrivacyMode)) {
       return 'R$ ●●●,●●';
+    }
+
+    // Para tipo 'number', verifica isClientNumbersHidden OU isPrivacyMode
+    if (type === 'number' && (isClientNumbersHidden || isPrivacyMode)) {
+      return '●●';
     }
     
     // Para outros tipos, só verifica isPrivacyMode
@@ -116,7 +151,9 @@ export function PrivacyModeProvider({ children }: { children: ReactNode }) {
       isPrivacyMode, 
       togglePrivacyMode, 
       isMoneyHidden, 
-      toggleMoneyVisibility, 
+      toggleMoneyVisibility,
+      isClientNumbersHidden,
+      toggleClientNumbersVisibility,
       maskData 
     }}>
       {children}
