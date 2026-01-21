@@ -181,24 +181,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let isMounted = true;
 
-    // Safety timeout - reduced to 2 seconds for faster UX
+    // Safety timeout - 8 seconds is enough for slow networks
     const loadingTimeout = setTimeout(() => {
       if (isMounted && authState === 'loading') {
-        // Timeout hit - just set unauthenticated and let user login
+        console.log('[useAuth] Safety timeout reached, checking cache...');
+        // Check if we have cached data to use
+        const sessionMarker = hasSessionMarker();
+        if (sessionMarker) {
+          // Try to use cached data
+          const cachedUserId = localStorage.getItem(CACHE_KEYS.USER_ID);
+          if (cachedUserId) {
+            const cached = getCachedData(cachedUserId);
+            if (cached.profile && cached.role) {
+              console.log('[useAuth] Using cached data after timeout');
+              setProfile(cached.profile);
+              setRole(cached.role);
+              setAuthState('authenticated');
+              return;
+            }
+          }
+        }
+        // No valid cache - set unauthenticated
         setAuthState('unauthenticated');
       }
-    }, 2000); // 2 second max wait
+    }, 8000);
 
     const initializeAuth = async () => {
       // IMPORTANT: Set up auth state change listener FIRST
-      // This ensures we don't miss any events during initialization
       const { data: { subscription } } = supabase.auth.onAuthStateChange(
         async (event: AuthChangeEvent, currentSession: Session | null) => {
           if (!isMounted) return;
           
-          console.log('[useAuth] Auth state changed:', event, currentSession?.user?.id?.slice(0, 8));
+          console.log('[useAuth] Auth event:', event);
           
-          // Handle different auth events
           switch (event) {
             case 'SIGNED_OUT':
               setSession(null);
@@ -215,56 +230,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (currentSession?.user) {
                 setSession(currentSession);
                 setUser(currentSession.user);
+                localStorage.setItem(CACHE_KEYS.SESSION_MARKER, 'true');
                 
                 // Load cached data for instant display
                 const cached = getCachedData(currentSession.user.id);
                 if (cached.profile) setProfile(cached.profile);
                 if (cached.role) setRole(cached.role);
                 
-                // Mark session marker
-                localStorage.setItem(CACHE_KEYS.SESSION_MARKER, 'true');
-                
-                // Fetch fresh data (non-blocking for UI)
-                fetchUserData(currentSession.user.id, isMounted, currentSession.access_token);
-                
-                // Only set authenticated after we have cached data or after fetch
+                // Set authenticated with cache, fetch fresh in background
                 if (cached.profile && cached.role) {
                   setAuthState('authenticated');
                 }
+                
+                // Always fetch fresh data
+                await fetchUserData(currentSession.user.id, isMounted, currentSession.access_token);
+                if (isMounted) setAuthState('authenticated');
               }
               break;
               
             case 'INITIAL_SESSION':
-              // This fires once when getSession completes - handle IMMEDIATELY
               if (currentSession?.user) {
                 setSession(currentSession);
                 setUser(currentSession.user);
+                localStorage.setItem(CACHE_KEYS.SESSION_MARKER, 'true');
                 
                 const cached = getCachedData(currentSession.user.id);
                 if (cached.profile) setProfile(cached.profile);
                 if (cached.role) setRole(cached.role);
                 
-                localStorage.setItem(CACHE_KEYS.SESSION_MARKER, 'true');
-                
-                // Set authenticated immediately with cache, fetch fresh data in background
+                // With cache: authenticate immediately, fetch in background
                 if (cached.profile && cached.role) {
                   setAuthState('authenticated');
                   fetchUserData(currentSession.user.id, isMounted, currentSession.access_token);
                 } else {
-                  // No cache - fetch and wait
+                  // No cache: wait for fetch
                   await fetchUserData(currentSession.user.id, isMounted, currentSession.access_token);
                   if (isMounted) setAuthState('authenticated');
                 }
               } else {
-                // NO SESSION - set unauthenticated IMMEDIATELY (don't wait)
-                if (isMounted) {
-                  setAuthState('unauthenticated');
-                }
+                // No session - unauthenticated
+                if (isMounted) setAuthState('unauthenticated');
               }
               break;
               
             default:
-              // Handle any other events
               if (currentSession?.user) {
                 setSession(currentSession);
                 setUser(currentSession.user);
@@ -273,36 +282,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       );
 
-      // THEN get the current session
-      // The INITIAL_SESSION event will fire automatically after this
+      // Get current session
       try {
         const { data: { session: initialSession }, error } = await supabase.auth.getSession();
         
         if (error) {
-          console.error('[useAuth] Error getting session:', error);
-          // Don't clear cache on error - user only logs out manually
-          // Let timeout handler use cache if available
-          return;
+          console.error('[useAuth] Session error:', error);
+          // Check cache before giving up
+          if (hasSessionMarker()) {
+            const cachedUserId = localStorage.getItem(CACHE_KEYS.USER_ID);
+            if (cachedUserId) {
+              const cached = getCachedData(cachedUserId);
+              if (cached.profile && cached.role) {
+                setProfile(cached.profile);
+                setRole(cached.role);
+                setAuthState('authenticated');
+                return;
+              }
+            }
+          }
         }
         
-        // No session = set unauthenticated immediately
-        if (!initialSession && isMounted) {
+        // INITIAL_SESSION event handles the rest
+        // But if no session, set unauthenticated now
+        if (!initialSession && isMounted && authState === 'loading') {
           setAuthState('unauthenticated');
         }
         
       } catch (error) {
-        console.error('[useAuth] Exception getting session:', error);
-        // On error, set unauthenticated so user can login
+        console.error('[useAuth] Exception:', error);
         if (isMounted) setAuthState('unauthenticated');
       }
 
-      // Store cleanup function
       return () => {
         subscription.unsubscribe();
       };
     };
 
-    // Start initialization
     const cleanupPromise = initializeAuth();
 
     return () => {
@@ -310,7 +326,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(loadingTimeout);
       cleanupPromise.then(cleanup => cleanup?.());
     };
-  }, []); // Empty deps - only run once
+  }, []);
 
   const fetchUserData = useCallback(async (userId: string, isMounted: boolean, accessToken?: string | null) => {
     // Prevent concurrent fetches
