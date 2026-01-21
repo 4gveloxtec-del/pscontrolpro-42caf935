@@ -697,11 +697,27 @@ function getRandomDelay(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1) + min) * 1000;
 }
 
+/**
+ * Check if we can respond to a seller chatbot message.
+ * 
+ * NEW LOGIC (same as admin):
+ * - Cooldown ONLY applies to the FIRST initial message of a new conversation
+ * - When user is navigating the flow (numbers 1,2,3, etc.) or returning with "*", 
+ *   cooldown is BYPASSED and bot responds immediately
+ * 
+ * @param isFlowNavigation - true if user is navigating flow (numbers) or returning to menu (*)
+ */
 function canRespond(
   contact: ChatbotContact | null,
   rule: ChatbotRule,
-  now: Date
+  now: Date,
+  isFlowNavigation: boolean = false
 ): { canSend: boolean; reason?: string } {
+  // If navigating within flow or returning to menu, ALWAYS allow response
+  if (isFlowNavigation) {
+    return { canSend: true };
+  }
+
   if (rule.cooldown_mode === "free") {
     return { canSend: true };
   }
@@ -2277,8 +2293,11 @@ Deno.serve(async (req) => {
       });
     }
     
-    // Check cooldown
-    const cooldownCheck = canRespond(contact, matchingRule, now);
+    // Detect if user is navigating the flow (numbers, *, voltar, etc.)
+    const isFlowNav = isFlowNavigationInput(messageText);
+    
+    // Check cooldown - ONLY blocks if NOT navigating flow
+    const cooldownCheck = canRespond(contact, matchingRule, now, isFlowNav);
     if (!cooldownCheck.canSend) {
       await supabase.from("chatbot_interactions").insert({
         seller_id: sellerId,
@@ -2290,9 +2309,14 @@ Deno.serve(async (req) => {
         block_reason: cooldownCheck.reason,
       });
       
+      console.log("[SellerChatbot] Cooldown active (initial message only):", cooldownCheck.reason);
       return new Response(JSON.stringify({ status: "blocked", reason: cooldownCheck.reason }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
+    
+    if (isFlowNav) {
+      console.log("[SellerChatbot] Flow navigation detected, bypassing cooldown");
     }
     
     // Handle free mode restrictions
