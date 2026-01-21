@@ -4,10 +4,13 @@
  * This is a minimal service worker for the admin panel.
  * It does NOT cache any resources or block network requests.
  * 
- * Version: 2.0.0 - Vercel/Production compatible
+ * IMPORTANT: Fetch events are ignored - all requests go directly to network.
+ * Cache is cleared on every install to ensure fresh deploys work correctly.
+ * 
+ * Version: 3.0.0 - Vercel/Production/Deploy compatible
  */
 
-const SW_VERSION = 'admin-prod-safe-v2';
+const SW_VERSION = 'admin-prod-safe-v3';
 
 try {
   // Install event - clear all caches, don't block
