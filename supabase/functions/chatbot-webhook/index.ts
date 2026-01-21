@@ -340,6 +340,21 @@ function canRespondAdmin(
   return { canSend: true };
 }
 
+// Helper to find main/initial node
+function findMainNode(nodes: AdminChatbotNode[]): AdminChatbotNode | null {
+  // Priority 1: node_key === "inicial"
+  const inicial = nodes.find(n => n.node_key === "inicial");
+  if (inicial) return inicial;
+  
+  // Priority 2: node with parent_key === null (root node)
+  const rootNode = nodes.find(n => n.parent_key === null);
+  if (rootNode) return rootNode;
+  
+  // Priority 3: first node with lowest sort_order
+  const sorted = [...nodes].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  return sorted[0] || null;
+}
+
 function processAdminInput(
   currentNodeKey: string,
   input: string,
@@ -351,17 +366,18 @@ function processAdminInput(
   }
 
   const normalizedInput = input.toLowerCase().trim();
+  
+  // Get main node (inicial or first available)
+  const mainNode = findMainNode(nodes);
 
   // Check for return to main menu
   if (normalizedInput === "*" || normalizedInput === "voltar" || normalizedInput === "menu" || normalizedInput === "0") {
-    const inicial = nodes.find(n => n.node_key === "inicial");
-    return { nextNode: inicial || null, message: inicial?.content || "" };
+    return { nextNode: mainNode, message: mainNode?.content || "" };
   }
 
   const currentNode = nodes.find(n => n.node_key === currentNodeKey);
   if (!currentNode) {
-    const inicial = nodes.find(n => n.node_key === "inicial");
-    return { nextNode: inicial || null, message: inicial?.content || "" };
+    return { nextNode: mainNode, message: mainNode?.content || "" };
   }
 
   // Input mappings for emoji numbers and text
@@ -497,16 +513,20 @@ async function processAdminChatbotMessage(
       normalizedInput === kw.keyword.toLowerCase().trim()
     );
 
+    // Find the main node for this chatbot
+    const mainNode = findMainNode(nodes as AdminChatbotNode[]);
+    const mainNodeKey = mainNode?.node_key || "inicial";
+    
     let responseMessage = "";
     let responseImageUrl = "";
-    let newNodeKey = contact.current_node_key || "inicial";
+    let newNodeKey = contact.current_node_key || mainNodeKey;
 
     if (matchedKeyword) {
       responseMessage = matchedKeyword.response_text;
       responseImageUrl = matchedKeyword.image_url || "";
-      console.log("[AdminChatbot] Keyword match:", matchedKeyword.keyword);
+      console.log("[AdminChatbot] Keyword match found");
     } else {
-      const currentNodeKey = contact.current_node_key || "inicial";
+      const currentNodeKey = contact.current_node_key || mainNodeKey;
       const result = processAdminInput(currentNodeKey, messageText, nodes as AdminChatbotNode[]);
 
       responseMessage = result.message;
@@ -514,6 +534,13 @@ async function processAdminChatbotMessage(
       if (result.nextNode) {
         newNodeKey = result.nextNode.node_key;
         responseImageUrl = result.nextNode.image_url || "";
+      } else if (!responseMessage && mainNode) {
+        // If no match found and this is a new contact, show main menu
+        if (!contact.current_node_key || contact.current_node_key === mainNodeKey) {
+          responseMessage = mainNode.content;
+          newNodeKey = mainNode.node_key;
+          responseImageUrl = mainNode.image_url || "";
+        }
       }
     }
 
@@ -1396,10 +1423,95 @@ Deno.serve(async (req) => {
             status: "ok", 
             message: "Chatbot webhook is online",
             timestamp: new Date().toISOString(),
-            version: "2.1.0",
+            version: "2.2.0",
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
+      }
+
+      // Full diagnostic mode
+      const diagnose = parsedUrl.searchParams.get("diagnose");
+      if (diagnose === "true") {
+        try {
+          // Check global config
+          const { data: globalConfig, error: globalError } = await supabase
+            .from("whatsapp_global_config")
+            .select("id, instance_name, is_active, api_url")
+            .eq("is_active", true)
+            .maybeSingle();
+
+          // Check admin chatbot config
+          const { data: adminNodes, error: adminError } = await supabase
+            .from("admin_chatbot_config")
+            .select("id, node_key, title, is_active")
+            .eq("is_active", true)
+            .limit(10);
+
+          // Check admin chatbot enabled setting
+          const { data: enabledSetting } = await supabase
+            .from("app_settings")
+            .select("value")
+            .eq("key", "admin_chatbot_enabled")
+            .maybeSingle();
+
+          // Check seller instances
+          const { data: sellerInstances, error: sellerError } = await supabase
+            .from("whatsapp_seller_instances")
+            .select("seller_id, instance_name, is_connected, instance_blocked")
+            .limit(10);
+
+          // Check chatbot rules count
+          const { count: rulesCount } = await supabase
+            .from("chatbot_rules")
+            .select("id", { count: "exact", head: true })
+            .eq("is_active", true);
+
+          // Check chatbot flows count
+          const { count: flowsCount } = await supabase
+            .from("chatbot_flows")
+            .select("id", { count: "exact", head: true })
+            .eq("is_active", true);
+
+          return new Response(
+            JSON.stringify({
+              status: "diagnostic",
+              version: "2.2.0",
+              timestamp: new Date().toISOString(),
+              globalConfig: globalConfig ? {
+                hasConfig: true,
+                instanceName: globalConfig.instance_name || "[NOT SET]",
+                isActive: globalConfig.is_active,
+                hasApiUrl: !!globalConfig.api_url,
+              } : { hasConfig: false, error: globalError?.message },
+              adminChatbot: {
+                enabled: enabledSetting?.value === "true",
+                nodesCount: adminNodes?.length || 0,
+                hasInitialNode: adminNodes?.some((n: any) => n.node_key === "inicial") || false,
+              },
+              sellerInstances: {
+                count: sellerInstances?.length || 0,
+                instances: sellerInstances?.map((i: any) => ({
+                  name: i.instance_name,
+                  connected: i.is_connected,
+                  blocked: i.instance_blocked,
+                })) || [],
+              },
+              chatbot: {
+                activeRules: rulesCount || 0,
+                activeFlows: flowsCount || 0,
+              },
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        } catch (diagError: any) {
+          return new Response(
+            JSON.stringify({
+              status: "diagnostic_error",
+              error: diagError.message,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
       }
 
       // Simplified diagnostic response
@@ -1407,8 +1519,8 @@ Deno.serve(async (req) => {
         JSON.stringify({ 
           status: "ok",
           message: "Chatbot webhook ready",
-          version: "2.1.0",
-          usage: "Send POST with Evolution API webhook payload",
+          version: "2.2.0",
+          usage: "Send POST with Evolution API webhook payload. Use ?diagnose=true for full diagnostic.",
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
@@ -1423,6 +1535,135 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: "Invalid JSON payload" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // POST diagnostic mode
+    if ((rawPayload as any).action === "diagnose") {
+      try {
+        // Check global config
+        const { data: globalConfig } = await supabase
+          .from("whatsapp_global_config")
+          .select("id, instance_name, is_active, api_url, api_token")
+          .eq("is_active", true)
+          .maybeSingle();
+
+        // Check admin chatbot config
+        const { data: adminNodes } = await supabase
+          .from("admin_chatbot_config")
+          .select("id, node_key, title, is_active, parent_key")
+          .eq("is_active", true)
+          .order("sort_order")
+          .limit(20);
+
+        // Check admin chatbot enabled setting
+        const { data: enabledSetting } = await supabase
+          .from("app_settings")
+          .select("value")
+          .eq("key", "admin_chatbot_enabled")
+          .maybeSingle();
+
+        // Check seller instances
+        const { data: sellerInstances } = await supabase
+          .from("whatsapp_seller_instances")
+          .select("seller_id, instance_name, is_connected, instance_blocked")
+          .limit(10);
+
+        // Check chatbot rules count
+        const { count: rulesCount } = await supabase
+          .from("chatbot_rules")
+          .select("id", { count: "exact", head: true })
+          .eq("is_active", true);
+
+        // Check chatbot flows count
+        const { count: flowsCount } = await supabase
+          .from("chatbot_flows")
+          .select("id", { count: "exact", head: true })
+          .eq("is_active", true);
+
+        // Check recent send logs for errors
+        const { data: recentLogs } = await supabase
+          .from("chatbot_send_logs")
+          .select("success, error_message, api_status_code, created_at")
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        // Test API connection if config exists
+        let apiConnectionTest = null;
+        if (globalConfig?.api_url && globalConfig?.api_token) {
+          try {
+            const testUrl = `${normalizeApiUrl(globalConfig.api_url)}/instance/fetchInstances`;
+            const testResponse = await fetchWithTimeout(testUrl, {
+              method: "GET",
+              headers: { apikey: globalConfig.api_token },
+            }, 8000);
+            
+            apiConnectionTest = {
+              status: testResponse.status,
+              ok: testResponse.ok,
+              url: testUrl.replace(globalConfig.api_token, "[HIDDEN]"),
+            };
+          } catch (testError: any) {
+            apiConnectionTest = {
+              status: "error",
+              message: testError.message,
+            };
+          }
+        }
+
+        // Find main node
+        const mainNode = adminNodes?.find((n: any) => n.node_key === "inicial") ||
+                        adminNodes?.find((n: any) => n.parent_key === null) ||
+                        adminNodes?.[0];
+
+        return new Response(
+          JSON.stringify({
+            status: "diagnostic",
+            version: "2.3.0",
+            timestamp: new Date().toISOString(),
+            globalConfig: globalConfig ? {
+              hasConfig: true,
+              instanceName: globalConfig.instance_name || "[NOT SET]",
+              isActive: globalConfig.is_active,
+              hasApiUrl: !!globalConfig.api_url,
+              hasApiToken: !!globalConfig.api_token,
+            } : { hasConfig: false },
+            apiConnectionTest,
+            adminChatbot: {
+              enabled: enabledSetting?.value === "true",
+              nodesCount: adminNodes?.length || 0,
+              hasInitialNode: !!adminNodes?.find((n: any) => n.node_key === "inicial"),
+              mainNodeKey: mainNode?.node_key || "[NONE]",
+              nodes: adminNodes?.map((n: any) => ({ key: n.node_key, parent: n.parent_key })) || [],
+            },
+            sellerInstances: {
+              count: sellerInstances?.length || 0,
+              instances: sellerInstances?.map((i: any) => ({
+                name: i.instance_name,
+                connected: i.is_connected,
+                blocked: i.instance_blocked,
+              })) || [],
+            },
+            chatbot: {
+              activeRules: rulesCount || 0,
+              activeFlows: flowsCount || 0,
+            },
+            recentSendLogs: recentLogs?.map((log: any) => ({
+              success: log.success,
+              error: log.error_message,
+              status: log.api_status_code,
+            })) || [],
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (diagError: any) {
+        return new Response(
+          JSON.stringify({
+            status: "diagnostic_error",
+            error: diagError.message,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     const payload = normalizeWebhookPayload(rawPayload);
