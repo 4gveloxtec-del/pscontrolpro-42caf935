@@ -115,8 +115,22 @@ function PasswordUpdateGuard({ children }: { children: React.ReactNode }) {
   }
   
   // If unauthenticated, redirect to auth
-  if (authState === 'unauthenticated' || !user) {
+  // IMPORTANT: Don't force redirect if auth is marked authenticated but user
+  // object hasn't been restored yet (network slow / session restore pending).
+  // This prevents "white screen"/redirect loops.
+  if (authState === 'unauthenticated') {
     return <Navigate to="/auth" replace />;
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-muted-foreground">Reconectando...</p>
+        </div>
+      </div>
+    );
   }
   
   // Aguarda o redirecionamento acontecer via useEffect
