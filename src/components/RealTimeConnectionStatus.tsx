@@ -1,3 +1,4 @@
+import { forwardRef } from 'react';
 import { useRealtimeConnectionSync } from '@/hooks/useRealtimeConnectionSync';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -46,13 +47,14 @@ interface RealTimeConnectionStatusProps {
  * - Auto-healing automático
  * - Nunca depende de estado local
  */
-export function RealTimeConnectionStatus({
-  variant = 'badge',
-  showLastSync = false,
-  showReconnect = true,
-  className,
-  heartbeatInterval = 30,
-}: RealTimeConnectionStatusProps) {
+export const RealTimeConnectionStatus = forwardRef<HTMLDivElement, RealTimeConnectionStatusProps>(
+  function RealTimeConnectionStatus({
+    variant = 'badge',
+    showLastSync = false,
+    showReconnect = true,
+    className,
+    heartbeatInterval = 30,
+  }, ref) {
   const {
     connected,
     configured,
@@ -460,4 +462,4 @@ export function RealTimeConnectionStatus({
       )}
     </div>
   );
-}
+});
