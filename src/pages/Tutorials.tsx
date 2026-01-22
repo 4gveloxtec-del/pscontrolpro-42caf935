@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabaseExternal as supabase } from '@/lib/supabase-external';
+import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -47,6 +49,7 @@ function getYouTubeWatchUrl(videoId: string): string {
 
 export default function Tutorials() {
   const { isAdmin } = useAuth();
+  const { dialogProps, confirm } = useConfirmDialog();
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -392,7 +395,15 @@ export default function Tutorials() {
                         variant="destructive"
                         size="sm"
                         className="h-8"
-                        onClick={() => deleteMutation.mutate(tutorial.id)}
+                        onClick={() => {
+                          confirm({
+                            title: 'Excluir tutorial',
+                            description: `Tem certeza que deseja excluir o tutorial "${tutorial.title}"?`,
+                            confirmText: 'Excluir',
+                            variant: 'destructive',
+                            onConfirm: () => deleteMutation.mutate(tutorial.id),
+                          });
+                        }}
                         disabled={deleteMutation.isPending}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -405,6 +416,9 @@ export default function Tutorials() {
           })}
         </div>
       )}
+      
+      {/* Global Confirm Dialog */}
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }

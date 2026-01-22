@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -8,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -77,6 +79,7 @@ interface CommandLog {
 
 export default function TestCommands() {
   const { user } = useAuth();
+  const { dialogProps, confirm } = useConfirmDialog();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('commands');
   
@@ -450,7 +453,15 @@ export default function TestCommands() {
                       <Button variant="outline" size="sm" onClick={() => handleEditCommand(cmd)}>
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => deleteCommandMutation.mutate(cmd.id)}>
+                      <Button variant="outline" size="sm" onClick={() => {
+                        confirm({
+                          title: 'Excluir comando',
+                          description: `Tem certeza que deseja excluir o comando "${cmd.command}"?`,
+                          confirmText: 'Excluir',
+                          variant: 'destructive',
+                          onConfirm: () => deleteCommandMutation.mutate(cmd.id),
+                        });
+                      }}>
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
@@ -505,7 +516,15 @@ export default function TestCommands() {
                       <Button variant="outline" size="sm" onClick={() => handleEditApi(api)}>
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button variant="outline" size="sm" onClick={() => deleteApiMutation.mutate(api.id)}>
+                      <Button variant="outline" size="sm" onClick={() => {
+                        confirm({
+                          title: 'Excluir API',
+                          description: `Tem certeza que deseja excluir a API "${api.name}"? Os comandos associados também serão removidos.`,
+                          confirmText: 'Excluir',
+                          variant: 'destructive',
+                          onConfirm: () => deleteApiMutation.mutate(api.id),
+                        });
+                      }}>
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
@@ -764,6 +783,9 @@ export default function TestCommands() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Global Confirm Dialog */}
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }
