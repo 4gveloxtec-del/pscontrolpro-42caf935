@@ -48,7 +48,6 @@ const Tutorials = lazy(() => import("./pages/Tutorials"));
 const SystemHealth = lazy(() => import("./pages/SystemHealth"));
 const ForcePasswordUpdate = lazy(() => import("./pages/ForcePasswordUpdate"));
 const TestCommands = lazy(() => import("./pages/TestCommands"));
-const ClientLookup = lazy(() => import("./pages/ClientLookup"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const ProjectDocumentation = lazy(() => import("./pages/ProjectDocumentation"));
 
@@ -164,8 +163,9 @@ const AppRoutes = () => {
         <Route path="/access-denied" element={<AccessDenied />} />
         <Route path="/force-password-update" element={<ForcePasswordUpdate />} />
         <Route path="/project-docs" element={<ProjectDocumentation />} />
-        {/* Redirect old shared-panels route to servers */}
+        {/* Redirect old routes */}
         <Route path="/shared-panels" element={<Navigate to="/servers" replace />} />
+        <Route path="/clients" element={<Navigate to="/clientes" replace />} />
         
         {/* ============ ADMIN PWA ROUTES ============ */}
         {/* Login do Admin */}
@@ -204,7 +204,7 @@ const AppRoutes = () => {
           <Route path="/whatsapp-automation" element={<WhatsAppAutomation />} />
           
           {/* Seller-only routes (revendedor) */}
-          <Route path="/clients" element={<Clients />} />
+          <Route path="/clientes" element={<Clients />} />
           <Route path="/servers" element={<Servers />} />
           <Route path="/panel-resellers" element={<PanelResellers />} />
           <Route path="/panels" element={<Panels />} />
@@ -216,7 +216,6 @@ const AppRoutes = () => {
           <Route path="/external-apps" element={<ExternalApps />} />
           <Route path="/my-apps" element={<MyApps />} />
           <Route path="/test-commands" element={<TestCommands />} />
-          <Route path="/consulta-avancada" element={<SellerOnly><ClientLookup /></SellerOnly>} />
           
           {/* Admin-only routes (legacy - mantidos para compatibilidade) */}
           <Route path="/sellers" element={
