@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Plus, Search, Phone, Mail, Calendar as CalendarIcon, CreditCard, User, Trash2, Eye, EyeOff, MessageCircle, Lock, Loader2, Monitor, Smartphone, Tv, Gamepad2, Laptop, Flame, ChevronDown, ExternalLink, AppWindow, Send, Archive, RotateCcw, Sparkles, Server, Copy, UserPlus, CheckCircle, X, DollarSign, Globe, ArrowRightLeft } from 'lucide-react';
+import { Plus, Search, Phone, Mail, Calendar as CalendarIcon, CreditCard, User, Trash2, Eye, EyeOff, MessageCircle, Lock, Loader2, Monitor, Smartphone, Tv, Gamepad2, Laptop, Flame, ChevronDown, ExternalLink, AppWindow, Send, Archive, RotateCcw, Sparkles, Server, Copy, UserPlus, CheckCircle, X, DollarSign, Globe, ArrowRightLeft, UserSearch, History, Shield, Package } from 'lucide-react';
 import { BulkImportClients } from '@/components/BulkImportClients';
 import { BulkServerMigration } from '@/components/BulkServerMigration';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -216,6 +216,11 @@ export default function Clients() {
   const [customWelcomeMessage, setCustomWelcomeMessage] = useState<string | null>(null);
   // State for bulk server migration
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
+  // State for 360° lookup modal
+  const [showLookupDialog, setShowLookupDialog] = useState(false);
+  const [lookupSearchQuery, setLookupSearchQuery] = useState('');
+  const [selectedLookupClientId, setSelectedLookupClientId] = useState<string | null>(null);
+  const [showLookupPasswords, setShowLookupPasswords] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -418,7 +423,102 @@ export default function Clients() {
     enabled: !!user?.id,
   });
 
-  // Handle shared credit selection - auto-fill all fields
+  // ============= Consulta 360° Queries =============
+  // Search clients for 360° lookup
+  const { data: lookupSearchResults = [], isLoading: isLookupSearching } = useQuery({
+    queryKey: ['client-lookup-search', lookupSearchQuery, user?.id],
+    queryFn: async () => {
+      if (!user?.id || lookupSearchQuery.length < 2) return [];
+      const normalizedQuery = lookupSearchQuery.toLowerCase().trim();
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name, phone, email, login, expiration_date, plan_name, is_archived')
+        .eq('seller_id', user.id)
+        .or(`name.ilike.%${normalizedQuery}%,phone.ilike.%${normalizedQuery}%,email.ilike.%${normalizedQuery}%,login.ilike.%${normalizedQuery}%`)
+        .order('name')
+        .limit(20);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.id && lookupSearchQuery.length >= 2 && showLookupDialog,
+    staleTime: 30000,
+  });
+
+  // Fetch full client data when selected in 360° lookup
+  const { data: lookupClientData, isLoading: isLoadingLookupClient } = useQuery({
+    queryKey: ['client-full-data', selectedLookupClientId, user?.id],
+    queryFn: async () => {
+      if (!user?.id || !selectedLookupClientId) return null;
+      // Fetch client with all related data
+      const { data: client, error: clientError } = await supabase
+        .from('clients')
+        .select(`
+          *,
+          plan:plans(name, price, duration_days, category),
+          server:servers(name, icon_url)
+        `)
+        .eq('id', selectedLookupClientId)
+        .eq('seller_id', user.id)
+        .single();
+      if (clientError) throw clientError;
+      
+      // Fetch related data in parallel
+      const [externalAppsResult, premiumAccountsResult, deviceAppsResult, messageHistoryResult, panelClientsResult] = await Promise.all([
+        supabase
+          .from('client_external_apps')
+          .select('id, email, password, expiration_date, devices, notes, fixed_app_name, external_app:external_apps(name, download_url)')
+          .eq('client_id', selectedLookupClientId)
+          .eq('seller_id', user.id),
+        supabase
+          .from('client_premium_accounts')
+          .select('id, plan_name, email, password, expiration_date, price, notes')
+          .eq('client_id', selectedLookupClientId)
+          .eq('seller_id', user.id),
+        supabase
+          .from('client_device_apps')
+          .select('id, app:reseller_device_apps(name, icon, download_url)')
+          .eq('client_id', selectedLookupClientId)
+          .eq('seller_id', user.id),
+        supabase
+          .from('message_history')
+          .select('id, message_type, message_content, sent_at')
+          .eq('client_id', selectedLookupClientId)
+          .eq('seller_id', user.id)
+          .order('sent_at', { ascending: false })
+          .limit(10),
+        supabase
+          .from('panel_clients')
+          .select('id, slot_type, panel:shared_panels(name)')
+          .eq('client_id', selectedLookupClientId)
+          .eq('seller_id', user.id),
+      ]);
+      
+      return {
+        ...client,
+        external_apps: externalAppsResult.data || [],
+        premium_accounts: premiumAccountsResult.data || [],
+        device_apps: deviceAppsResult.data || [],
+        message_history: messageHistoryResult.data || [],
+        panel_clients: panelClientsResult.data || [],
+      };
+    },
+    enabled: !!user?.id && !!selectedLookupClientId && showLookupDialog,
+    staleTime: 30000,
+  });
+
+  // Helper function for 360° lookup
+  const getLookupStatusBadge = (expirationDate: string) => {
+    const daysLeft = differenceInDays(new Date(expirationDate), startOfToday());
+    if (daysLeft < 0) return { text: 'Vencido', class: 'bg-destructive text-destructive-foreground' };
+    if (daysLeft <= 3) return { text: `${daysLeft}d`, class: 'bg-warning text-warning-foreground' };
+    return { text: `${daysLeft}d`, class: 'bg-success text-success-foreground' };
+  };
+
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${label} copiado!`);
+  };
+
   const handleSharedCreditSelect = useCallback((selection: SharedCreditSelection | null) => {
     setSelectedSharedCredit(selection);
     
@@ -2872,14 +2972,25 @@ export default function Clients() {
       {/* Filters */}
       <div className="flex flex-col gap-3">
         {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por nome, login, DNS..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-10 h-9"
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por nome, login, DNS..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-10 h-9"
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5 shrink-0 bg-gradient-to-r from-primary/10 to-purple-500/10 border-primary/30 hover:border-primary/50"
+            onClick={() => setShowLookupDialog(true)}
+          >
+            <UserSearch className="h-4 w-4 text-primary" />
+            <span className="hidden sm:inline">Consulta 360°</span>
+          </Button>
         </div>
         
         {/* Category Filter Tabs */}
@@ -3971,6 +4082,282 @@ export default function Clients() {
         onConfirm={handleWelcomeConfirm}
         isLoading={createMutation.isPending}
       />
+
+      {/* Consulta 360° Dialog */}
+      <Dialog open={showLookupDialog} onOpenChange={(open) => {
+        setShowLookupDialog(open);
+        if (!open) {
+          setLookupSearchQuery('');
+          setSelectedLookupClientId(null);
+          setShowLookupPasswords(false);
+        }
+      }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserSearch className="h-5 w-5 text-primary" />
+              Consulta 360° - Visão Completa do Cliente
+            </DialogTitle>
+            <DialogDescription>
+              Pesquise e veja todas as informações do cliente em um único lugar
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto space-y-4">
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nome, telefone, email ou login..."
+                value={lookupSearchQuery}
+                onChange={(e) => {
+                  setLookupSearchQuery(e.target.value);
+                  setSelectedLookupClientId(null);
+                }}
+                className="pl-10"
+              />
+            </div>
+            
+            {/* Search Results */}
+            {lookupSearchQuery.length >= 2 && !selectedLookupClientId && (
+              <div className="border rounded-lg divide-y max-h-[200px] overflow-y-auto">
+                {isLookupSearching ? (
+                  <div className="p-4 flex items-center justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : lookupSearchResults.length === 0 ? (
+                  <div className="p-4 text-center text-muted-foreground">
+                    Nenhum cliente encontrado
+                  </div>
+                ) : (
+                  lookupSearchResults.map((result: any) => {
+                    const badge = getLookupStatusBadge(result.expiration_date);
+                    return (
+                      <button
+                        key={result.id}
+                        className="w-full p-3 text-left hover:bg-muted/50 transition-colors flex items-center justify-between"
+                        onClick={() => setSelectedLookupClientId(result.id)}
+                      >
+                        <div>
+                          <p className="font-medium">{result.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {result.phone || result.email || result.login || 'Sem contato'}
+                          </p>
+                        </div>
+                        <Badge className={badge.class}>{badge.text}</Badge>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
+            
+            {/* Client Full Data */}
+            {selectedLookupClientId && (
+              <div className="space-y-4">
+                {isLoadingLookupClient ? (
+                  <div className="p-8 flex items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : lookupClientData ? (
+                  <>
+                    {/* Client Header */}
+                    <div className="flex items-center justify-between bg-muted/30 rounded-lg p-4">
+                      <div>
+                        <h3 className="text-lg font-semibold flex items-center gap-2">
+                          <User className="h-5 w-5 text-primary" />
+                          {lookupClientData.name}
+                        </h3>
+                        <div className="flex gap-2 mt-1">
+                          <Badge className={getLookupStatusBadge(lookupClientData.expiration_date).class}>
+                            {getLookupStatusBadge(lookupClientData.expiration_date).text}
+                          </Badge>
+                          {lookupClientData.category && (
+                            <Badge variant="secondary">{lookupClientData.category}</Badge>
+                          )}
+                          {lookupClientData.is_archived && (
+                            <Badge variant="outline" className="border-warning text-warning">Arquivado</Badge>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowLookupPasswords(!showLookupPasswords)}
+                      >
+                        {showLookupPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        <span className="ml-1">{showLookupPasswords ? 'Ocultar' : 'Mostrar'} senhas</span>
+                      </Button>
+                    </div>
+                    
+                    {/* Info Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Contact Info */}
+                      <Card>
+                        <CardContent className="p-4 space-y-2">
+                          <h4 className="font-medium flex items-center gap-2 text-sm text-muted-foreground">
+                            <Phone className="h-4 w-4" /> Contato
+                          </h4>
+                          {lookupClientData.phone && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm">{lookupClientData.phone}</span>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(lookupClientData.phone!, 'Telefone')}>
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                          {lookupClientData.email && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm">{lookupClientData.email}</span>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(lookupClientData.email!, 'Email')}>
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                          {lookupClientData.telegram && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm">@{lookupClientData.telegram}</span>
+                            </div>
+                          )}
+                          {!lookupClientData.phone && !lookupClientData.email && !lookupClientData.telegram && (
+                            <p className="text-sm text-muted-foreground">Nenhum contato cadastrado</p>
+                          )}
+                        </CardContent>
+                      </Card>
+                      
+                      {/* Credentials */}
+                      <Card>
+                        <CardContent className="p-4 space-y-2">
+                          <h4 className="font-medium flex items-center gap-2 text-sm text-muted-foreground">
+                            <Lock className="h-4 w-4" /> Credenciais
+                          </h4>
+                          {lookupClientData.login && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm">Login: {lookupClientData.login}</span>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(lookupClientData.login!, 'Login')}>
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                          {lookupClientData.password && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm">Senha: {showLookupPasswords ? lookupClientData.password : '••••••'}</span>
+                              {showLookupPasswords && (
+                                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(lookupClientData.password!, 'Senha')}>
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                          {lookupClientData.dns && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm">DNS: {lookupClientData.dns}</span>
+                              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copyToClipboard(lookupClientData.dns!, 'DNS')}>
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                      
+                      {/* Plan & Service */}
+                      <Card>
+                        <CardContent className="p-4 space-y-2">
+                          <h4 className="font-medium flex items-center gap-2 text-sm text-muted-foreground">
+                            <Package className="h-4 w-4" /> Plano & Serviço
+                          </h4>
+                          <p className="text-sm"><strong>Plano:</strong> {lookupClientData.plan_name || 'Não definido'}</p>
+                          <p className="text-sm"><strong>Valor:</strong> R$ {(lookupClientData.plan_price || 0).toFixed(2)}</p>
+                          <p className="text-sm"><strong>Vencimento:</strong> {format(new Date(lookupClientData.expiration_date), "dd/MM/yyyy", { locale: ptBR })}</p>
+                          <p className="text-sm"><strong>Servidor:</strong> {lookupClientData.server_name || 'Não definido'}</p>
+                        </CardContent>
+                      </Card>
+                      
+                      {/* Device */}
+                      <Card>
+                        <CardContent className="p-4 space-y-2">
+                          <h4 className="font-medium flex items-center gap-2 text-sm text-muted-foreground">
+                            <Smartphone className="h-4 w-4" /> Dispositivo
+                          </h4>
+                          <p className="text-sm"><strong>Tipo:</strong> {lookupClientData.device || 'Não definido'}</p>
+                          {lookupClientData.device_model && (
+                            <p className="text-sm"><strong>Modelo:</strong> {lookupClientData.device_model}</p>
+                          )}
+                          {lookupClientData.app_name && (
+                            <p className="text-sm"><strong>App:</strong> {lookupClientData.app_name}</p>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                    
+                    {/* External Apps */}
+                    {lookupClientData.external_apps && lookupClientData.external_apps.length > 0 && (
+                      <Card>
+                        <CardContent className="p-4">
+                          <h4 className="font-medium flex items-center gap-2 text-sm text-muted-foreground mb-3">
+                            <AppWindow className="h-4 w-4" /> Apps Pagos ({lookupClientData.external_apps.length})
+                          </h4>
+                          <div className="space-y-2">
+                            {lookupClientData.external_apps.map((app: any) => (
+                              <div key={app.id} className="flex items-center justify-between p-2 bg-muted/30 rounded">
+                                <div>
+                                  <p className="text-sm font-medium">{app.fixed_app_name || app.external_app?.name || 'App'}</p>
+                                  {app.expiration_date && (
+                                    <p className="text-xs text-muted-foreground">
+                                      Vence: {format(new Date(app.expiration_date), "dd/MM/yyyy", { locale: ptBR })}
+                                    </p>
+                                  )}
+                                </div>
+                                {app.email && showLookupPasswords && (
+                                  <span className="text-xs">{app.email}</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                    
+                    {/* Message History */}
+                    {lookupClientData.message_history && lookupClientData.message_history.length > 0 && (
+                      <Card>
+                        <CardContent className="p-4">
+                          <h4 className="font-medium flex items-center gap-2 text-sm text-muted-foreground mb-3">
+                            <History className="h-4 w-4" /> Histórico de Mensagens ({lookupClientData.message_history.length})
+                          </h4>
+                          <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                            {lookupClientData.message_history.map((msg: any) => (
+                              <div key={msg.id} className="p-2 bg-muted/30 rounded text-sm">
+                                <div className="flex justify-between text-xs text-muted-foreground mb-1">
+                                  <span>{msg.message_type}</span>
+                                  {msg.sent_at && <span>{format(new Date(msg.sent_at), "dd/MM HH:mm", { locale: ptBR })}</span>}
+                                </div>
+                                <p className="line-clamp-2">{msg.message_content}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                    
+                    {/* Notes */}
+                    {lookupClientData.notes && (
+                      <Card>
+                        <CardContent className="p-4">
+                          <h4 className="font-medium flex items-center gap-2 text-sm text-muted-foreground mb-2">
+                            <Shield className="h-4 w-4" /> Observações
+                          </h4>
+                          <p className="text-sm whitespace-pre-wrap">{lookupClientData.notes}</p>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Global Confirm Dialog */}
       <ConfirmDialog {...dialogProps} />
