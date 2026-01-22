@@ -32,6 +32,7 @@ export default function Referrals() {
         .from('clients')
         .select('id, name, referral_code')
         .eq('seller_id', user!.id)
+        .eq('is_archived', false)
         .order('name');
       if (error) throw error;
       return data as Client[];
