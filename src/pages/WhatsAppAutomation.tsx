@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, memo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,13 +7,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { 
-  MessageCircle, Settings, Users, AlertTriangle, CheckCircle, Loader2, RefreshCw, Shield, Ban, Eye, Clock, ListOrdered
+  MessageCircle, Settings, Users, AlertTriangle, Loader2, RefreshCw, Shield, Ban, Eye, Clock, ListOrdered, Sparkles, CheckCircle
 } from 'lucide-react';
 import { WhatsAppGlobalConfig } from '@/components/WhatsAppGlobalConfig';
 import { WhatsAppSellerConfig } from '@/components/WhatsAppSellerConfig';
 import { SimplifiedWhatsAppConfig } from '@/components/SimplifiedWhatsAppConfig';
 import { ManualMessageSender } from '@/components/ManualMessageSender';
 import { SmartMessageQueue } from '@/components/SmartMessageQueue';
+import { WhatsAppStatusCard } from '@/components/WhatsAppStatusCard';
 import { useWhatsAppGlobalConfig } from '@/hooks/useWhatsAppGlobalConfig';
 import { useWhatsAppSellerInstance } from '@/hooks/useWhatsAppSellerInstance';
 import { format } from 'date-fns';
@@ -41,27 +42,6 @@ interface BlockedSeller {
     subscription_expires_at: string | null;
   };
 }
-
-// Memoized status badges component
-const StatusBadges = memo(({ isApiActive, isConnected, autoSendEnabled }: {
-  isApiActive: boolean;
-  isConnected: boolean;
-  autoSendEnabled: boolean;
-}) => (
-  <div className="flex flex-wrap gap-2">
-    <Badge variant={isApiActive ? "default" : "destructive"}>
-      API: {isApiActive ? 'Ativa' : 'Inativa'}
-    </Badge>
-    <Badge variant={isConnected ? "default" : "secondary"}>
-      {isConnected ? 'Conectado' : 'Desconectado'}
-    </Badge>
-    <Badge variant={autoSendEnabled ? "default" : "outline"}>
-      {autoSendEnabled ? 'Automático' : 'Manual'}
-    </Badge>
-  </div>
-));
-
-StatusBadges.displayName = 'StatusBadges';
 
 export default function WhatsAppAutomation() {
   const { user, isAdmin } = useAuth();
@@ -254,26 +234,11 @@ export default function WhatsAppAutomation() {
         </TabsList>
 
         <TabsContent value="dashboard" className="space-y-6">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2">
-                {isConnected ? <CheckCircle className="h-5 w-5 text-success" /> : <AlertTriangle className="h-5 w-5 text-warning" />}
-                Status
-              </CardTitle>
-              {isConnected && sellerInstance?.connected_phone && (
-                <p className="text-sm font-medium text-green-600 dark:text-green-400 flex items-center gap-1.5">
-                  📱 Número conectado: <strong>{sellerInstance.connected_phone}</strong>
-                </p>
-              )}
-            </CardHeader>
-            <CardContent>
-              <StatusBadges 
-                isApiActive={isApiActive}
-                isConnected={isConnected ?? false}
-                autoSendEnabled={sellerInstance?.auto_send_enabled ?? false}
-              />
-            </CardContent>
-          </Card>
+          {/* Card de Status Modernizado */}
+          <WhatsAppStatusCard 
+            isApiActive={isApiActive}
+            autoSendEnabled={sellerInstance?.auto_send_enabled ?? false}
+          />
 
           {isAdmin ? (
             <div className="grid gap-6 md:grid-cols-2">
