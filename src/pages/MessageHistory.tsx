@@ -1,8 +1,10 @@
 import { useAuth } from '@/hooks/useAuth';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { toast } from 'sonner';
 import { History, Trash2, MessageCircle, User, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
@@ -46,6 +48,7 @@ const typeColors: Record<string, string> = {
 
 export default function MessageHistory() {
   const { user } = useAuth();
+  const { dialogProps, confirm } = useConfirmDialog();
   const queryClient = useQueryClient();
 
   const { data: messages = [], isLoading } = useQuery({
@@ -165,9 +168,13 @@ export default function MessageHistory() {
                     size="icon"
                     className="text-destructive hover:text-destructive"
                     onClick={() => {
-                      if (confirm('Excluir esta mensagem do histórico?')) {
-                        deleteMutation.mutate(message.id);
-                      }
+                      confirm({
+                        title: 'Excluir mensagem',
+                        description: 'Tem certeza que deseja excluir esta mensagem do histórico?',
+                        confirmText: 'Excluir',
+                        variant: 'destructive',
+                        onConfirm: () => deleteMutation.mutate(message.id),
+                      });
                     }}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -178,6 +185,9 @@ export default function MessageHistory() {
           ))}
         </div>
       )}
+      
+      {/* Global Confirm Dialog */}
+      <ConfirmDialog {...dialogProps} />
     </div>
   );
 }
