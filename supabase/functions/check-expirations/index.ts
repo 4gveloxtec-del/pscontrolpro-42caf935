@@ -127,15 +127,19 @@ function formatSellerExpirationMessage(seller: ExpiringSeller, today: Date): { t
   if (diffDays <= 0) {
     urgency = 'expired';
     emoji = '🔴';
-    timeText = 'Sua assinatura venceu!';
+    timeText = 'Sua assinatura venceu HOJE!';
   } else if (diffDays === 1) {
     urgency = 'critical';
-    emoji = '🟠';
-    timeText = 'Sua assinatura vence amanhã!';
-  } else if (diffDays === 2) {
+    emoji = '🔴';
+    timeText = 'Sua assinatura vence AMANHÃ!';
+  } else if (diffDays === 3) {
     urgency = 'warning';
+    emoji = '🟠';
+    timeText = 'Sua assinatura vence em 3 dias!';
+  } else if (diffDays === 7) {
+    urgency = 'info';
     emoji = '🟡';
-    timeText = 'Sua assinatura vence em 2 dias';
+    timeText = 'Sua assinatura vence em 7 dias';
   } else {
     urgency = 'info';
     emoji = '🔵';
@@ -144,7 +148,7 @@ function formatSellerExpirationMessage(seller: ExpiringSeller, today: Date): { t
   
   return {
     title: `${emoji} Renovação Necessária`,
-    body: `${timeText} • ${expDateFormatted}`,
+    body: `${timeText} • Vencimento: ${expDateFormatted}`,
     urgency
   };
 }
@@ -190,14 +194,20 @@ Deno.serve(async (req: Request) => {
     // ========== CHECK SELLER SUBSCRIPTIONS ==========
     console.log('[check-expirations] Checking seller subscriptions...');
     
-    // Get sellers with expiring subscriptions (next max days)
+    // Fixed notification days for seller subscriptions: 7, 3, and 1 day before expiration
+    const SELLER_NOTIFICATION_DAYS = [7, 3, 1, 0]; // 0 = expiration day
+    
+    // Get sellers with expiring subscriptions (within 7 days)
+    const sevenDaysFromNow = new Date(today);
+    sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+    
     const { data: expiringSellers, error: sellersError } = await supabase
       .from('profiles')
       .select('id, full_name, email, subscription_expires_at')
       .not('subscription_expires_at', 'is', null)
       .eq('is_permanent', false)
       .gte('subscription_expires_at', today.toISOString())
-      .lte('subscription_expires_at', maxDaysFromNow.toISOString());
+      .lte('subscription_expires_at', sevenDaysFromNow.toISOString());
 
     if (sellersError) {
       console.error('[check-expirations] Error fetching expiring sellers:', sellersError);
@@ -207,9 +217,20 @@ Deno.serve(async (req: Request) => {
 
     let sellerNotificationsSent = 0;
 
-    // Send notifications to expiring sellers
+    // Send notifications to expiring sellers ONLY on specific days: 7, 3, 1, and 0 (expiration day)
     if (expiringSellers && expiringSellers.length > 0) {
       for (const seller of expiringSellers) {
+        // Calculate days until expiration
+        const expDate = new Date(seller.subscription_expires_at);
+        expDate.setHours(0, 0, 0, 0);
+        const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Only send on specific days (7, 3, 1, 0)
+        if (!SELLER_NOTIFICATION_DAYS.includes(diffDays)) {
+          console.log(`[check-expirations] Skipping seller ${seller.email} - ${diffDays} days is not a notification day`);
+          continue;
+        }
+
         // Check if seller has push subscription
         const { data: sellerSub } = await supabase
           .from('push_subscriptions')
@@ -222,16 +243,7 @@ Deno.serve(async (req: Request) => {
           continue;
         }
 
-        // Check if this seller should receive notification based on their preference
-        const sellerDays = notificationDaysMap[seller.id] ?? 3;
-        const expDate = new Date(seller.subscription_expires_at);
-        expDate.setHours(0, 0, 0, 0);
-        const diffDays = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        
-        if (diffDays > sellerDays && diffDays > 0) {
-          console.log(`[check-expirations] Skipping seller ${seller.email} - ${diffDays} days left, preference is ${sellerDays}`);
-          continue;
-        }
+        console.log(`[check-expirations] Sending notification to ${seller.email} - ${diffDays} days until expiration`);
 
         const { title, body, urgency } = formatSellerExpirationMessage(seller, today);
 
