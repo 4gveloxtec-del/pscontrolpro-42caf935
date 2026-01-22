@@ -19,17 +19,28 @@ export function useWhatsAppGlobalConfig() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load global config (admin only). Non-admin MUST NOT load/track global WhatsApp config.
+  // Load global config - admins get full config, resellers only get is_active status
   const fetchConfig = useCallback(async () => {
-    if (!isAdmin) {
-      setConfig(null);
-      setError(null);
-      setIsLoading(false);
-      return;
-    }
-
     try {
       setError(null);
+      
+      if (!isAdmin) {
+        // For resellers: fetch only is_active via secure function (no sensitive data exposed)
+        const { data, error: fnError } = await supabase
+          .rpc('get_global_api_status');
+        
+        if (fnError) {
+          console.log('Could not fetch API status for reseller:', fnError.message);
+          // Fallback: assume API is active if we can't check
+          setConfig({ api_url: '', api_token: '', is_active: true });
+        } else {
+          setConfig({ api_url: '', api_token: '', is_active: data ?? false });
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // Admin: fetch full config
       const { data, error: fetchError } = await supabase
         .from('whatsapp_global_config')
         .select('*')

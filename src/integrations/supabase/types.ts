@@ -2713,6 +2713,7 @@ export type Database = {
         Returns: undefined
       }
       find_server_icon: { Args: { server_name: string }; Returns: string }
+      get_global_api_status: { Args: never; Returns: boolean }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
